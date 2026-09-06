@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# PRIVATE DATA — never commit these.
+# odometer_state.json contains every priced message, real session IDs and
+# your actual spend. budget.json contains live per-session costs.
+# ---------------------------------------------------------------------------
+odometer_state.json
+budget.json
+grace_claims.json
+grace_claims.json.*
+*.csv
+opencode_cost_*.csv
+
+# Local user config (may contain private provider names / rates)
+config.json
+prices.local.json
+prices.*.local.json
+
+# ---------------------------------------------------------------------------
+# Build artefacts
+# ---------------------------------------------------------------------------
+build/
+dist/
+*.spec.bak
+*.exe
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

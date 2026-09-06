@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "OPTIONAL private price overlay.",
+    "",
+    "Copy this to your data directory as `prices.local.json`:",
+    "  Windows : %LOCALAPPDATA%\\OpenCodeOdometer\\prices.local.json",
+    "  Linux   : ~/.local/share/opencode-odometer/prices.local.json",
+    "  macOS   : ~/.local/share/opencode-odometer/prices.local.json",
+    "",
+    "Entries here are merged ON TOP of prices.json at startup, so you can",
+    "regenerate the public table (python tools/gen_prices.py) without losing",
+    "your private rates. This file is gitignored.",
+    "",
+    "Use it for: internal AI gateways, reseller markups, negotiated rates,",
+    "or any provider whose API does not report cost.",
+    "",
+    "All figures are USD per 1,000,000 tokens."
+  ],
+
+  "reference_model": "myhub/claude-sonnet-4-5",
+
+  "models": {
+    "myhub/claude-sonnet-4-5": {
+      "name": "Claude Sonnet 4.5 (via internal hub, 1.10x list)",
+      "input": 3.3,
+      "output": 16.5,
+      "cache_read": 0.33,
+      "cache_write": 4.125
+    },
+    "myhub/claude-opus-4-5": {
+      "name": "Claude Opus 4.5 (via internal hub, 1.10x list)",
+      "input": 5.5,
+      "output": 27.5,
+      "cache_read": 0.55,
+      "cache_write": 6.875
+    },
+    "myhub/internal-sovereign-model": {
+      "name": "Sovereign model (no charge)",
+      "free": true,
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    }
+  }
+}
