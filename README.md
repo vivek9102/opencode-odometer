@@ -64,7 +64,7 @@ meaningless. See [Private pricing](#private-pricing).
 OpenCode installed.
 
 ```powershell
-git clone https://github.com/YOURNAME/opencode-odometer.git
+git clone https://github.com/viv9102/opencode-odometer.git
 cd opencode-odometer
 python opencode_monitor.py
 ```

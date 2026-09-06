@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Compile check
+        run: python -m compileall -q opencode_monitor.py tools tests
+
+      - name: Run tests
+        run: python tests/test_pricing.py
+
+      - name: Validate prices.json
+        run: |
+          python -c "
+          import json, sys
+          d = json.load(open('prices.json', encoding='utf-8'))
+          m = d.get('models', {})
+          assert m, 'no models in prices.json'
+          ref = d.get('reference_model')
+          assert ref in m, f'reference_model {ref} missing from table'
+          bad = [k for k, v in m.items()
+                 if not all(isinstance(v.get(f, 0), (int, float))
+                            for f in ('input','output','cache_read','cache_write'))]
+          assert not bad, f'non-numeric rates: {bad[:5]}'
+          print(f'ok: {len(m)} models, reference={ref}')
+          "
+
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax check plugin
+        run: node --check plugin/odometer.js
+
+  privacy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure no private data is tracked
+        run: |
+          set -e
+          fail=0
+          for f in odometer_state.json budget.json grace_claims.json prices.local.json; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              echo "::error::$f must never be committed"
+              fail=1
+            fi
+          done
+          if git grep -qIE 'ses_[a-zA-Z0-9]{20}' -- . ':!*.md'; then
+            echo "::error::possible session ids in tracked files"
+            fail=1
+          fi
+          exit $fail
