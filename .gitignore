@@ -18,10 +18,21 @@ prices.*.local.json
 # ---------------------------------------------------------------------------
 # Build artefacts
 # ---------------------------------------------------------------------------
-build/
-dist/
+build/bin/
+build/OpenCode_Odometer/
+/dist/
 *.spec.bak
 *.exe
+
+# build/appicon.png and build/windows/* are Wails build INPUTS (icon, manifest,
+# version info), not outputs, so they must be tracked or the icon is lost.
+# Only the compiled output under build/bin is excluded, above.
+
+# frontend/dist is SOURCE, not a build artefact: it is the hand-written UI
+# embedded by //go:embed all:frontend/dist. A bare "dist/" rule also matched it
+# and would have published a repository that cannot compile.
+!frontend/dist/
+!frontend/dist/**
 
 # ---------------------------------------------------------------------------
 # Python

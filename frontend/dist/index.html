@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenCode Odometer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ===== COMPACT BAR ===== -->
+  <div id="bar" class="view">
+    <div id="bar-odometer" class="odometer-box drag" title="Click: TRIP/TOTAL · Double click: expand · Right click: menu"></div>
+    <div id="bar-side" class="drag">
+      <div id="bar-rate">$0.00/hr</div>
+      <div id="bar-model">idle</div>
+    </div>
+    <span id="bar-unpriced" class="bar-warn hidden" title="Some models have no price - spend is not being counted">!</span>
+    <button id="bar-expand" class="bar-btn" title="Expand">&#9650;</button>
+  </div>
+
+  <!-- ===== EXPANDED BOARD ===== -->
+  <div id="board" class="view hidden">
+    <!-- Fixed Header Region -->
+    <div class="fixed-head-region">
+      <div class="head drag">
+        <span id="bd-mode" class="mode">TRIP</span>
+        <span id="bd-status" class="status">saved $0.0000</span>
+        <span id="bd-conn" class="conn" title="OpenCode connection">connecting</span>
+        <button id="bd-collapse" class="text-btn">&#9660; collapse</button>
+      </div>
+
+      <div id="bd-odometer" class="odometer-box big" style="margin:0 auto"></div>
+
+      <!-- stat cards -->
+      <div class="stats">
+        <div class="card"><div class="accent" style="background:#dc2626"></div><div class="card-label">BURN RATE</div><div id="bd-rate" class="card-val">-</div></div>
+        <div class="card"><div class="accent" style="background:#22c55e"></div><div class="card-label">SAVED (FREE)</div><div id="bd-saved" class="card-val">-</div></div>
+        <div class="card"><div class="accent" style="background:#2563eb"></div><div class="card-label">TOKENS</div><div id="bd-tokens" class="card-val">-</div></div>
+        <div class="card"><div class="accent" style="background:#7c3aed"></div><div class="card-label">LAST MODEL</div><div id="bd-model" class="card-val">-</div></div>
+      </div>
+    </div>
+
+    <!-- Scrollable Middle Region: per-model table -->
+    <div id="bd-table-wrap" class="table-wrap">
+      <table id="bd-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-col="key">MODEL <span class="sort-arrow"></span></th>
+            <th class="sortable num" data-col="msgs">MSGS <span class="sort-arrow"></span></th>
+            <th class="sortable num" data-col="in">IN <span class="sort-arrow"></span></th>
+            <th class="sortable num" data-col="out">OUT <span class="sort-arrow"></span></th>
+            <th class="sortable num" data-col="cache">CACHE <span class="sort-arrow"></span></th>
+            <th class="sortable num" data-col="cost">COST $ <span class="sort-arrow">&#9660;</span></th>
+          </tr>
+        </thead>
+        <tbody id="bd-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Fixed Footer Region -->
+    <div class="fixed-footer-region">
+      <!-- session budget row -->
+      <div class="budget-row">
+        <label class="chk" title="Applies to each chat separately, not to your total spend."><input type="checkbox" id="bd-enabled" /> LIMIT PER CHAT</label>
+        <span class="dollar">$</span>
+        <input type="text" id="bd-limit" class="limit" />
+        <select id="bd-mode-sel">
+          <option value="warn">warn</option>
+          <option value="soft">soft</option>
+          <option value="hard">hard</option>
+        </select>
+        <div class="budget-bar-wrap" title="">
+          <div id="bd-bar-track">
+            <div id="bd-bar-fill"></div>
+            <div id="bd-bar-warn"></div>
+          </div>
+        </div>
+        <span id="bd-budget-label" class="budget-label">off</span>
+      </div>
+
+      <!-- bottom controls -->
+      <div class="controls">
+        <button id="bd-toggle" class="ctl">TRIP / TOTAL</button>
+        <button id="bd-reset" class="ctl">RESET TRIP</button>
+        <button id="bd-reload" class="ctl" title="Re-read prices.json and prices.local.json from disk">RELOAD PRICES</button>
+        <button id="bd-update-prices" class="ctl" title="Download the latest rates from models.dev">UPDATE PRICES</button>
+        <button id="bd-dock" class="ctl" title="Cycle dock position (F2)">DOCK</button>
+        <button id="bd-switch" class="ctl switch" title="Show cheaper models">CHEAPER MODELS</button>
+        <button id="bd-stop" class="ctl stop" title="Abort the active session in OpenCode">STOP SESSION</button>
+        <span id="bd-estimated" class="est-note hidden"></span>
+        <button id="bd-unpriced" class="ctl unpriced hidden" title="Some models have no price, so their spend is not counted"></button>
+        <button id="bd-export" class="ctl right">EXPORT CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== LIMIT REACHED SCREEN ===== -->
+  <div id="advice" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content advice-content">
+      <div class="advice-stripe"></div>
+      <div class="modal-header">
+        <h3 id="advice-title">SESSION LIMIT REACHED</h3>
+        <button id="advice-close" class="modal-close-btn">&times;</button>
+      </div>
+      <p id="advice-sub" class="modal-sub"></p>
+
+      <!-- session at a glance: the numbers behind the decision -->
+      <div class="advice-stats">
+        <div class="astat"><div class="astat-label">SESSION SPEND</div><div id="astat-cost" class="astat-val">-</div></div>
+        <div class="astat"><div class="astat-label">BURN RATE</div><div id="astat-rate" class="astat-val">-</div></div>
+        <div class="astat"><div class="astat-label">TOKENS</div><div id="astat-tokens" class="astat-val">-</div></div>
+        <div class="astat"><div class="astat-label">TURNS</div><div id="astat-msgs" class="astat-val">-</div></div>
+      </div>
+
+      <div class="advice-box">
+        <div class="advice-box-label">WHAT SPENT IT</div>
+        <div id="advice-drivers"></div>
+      </div>
+
+      <div class="advice-box">
+        <div class="advice-box-label">SWITCH TO A CHEAPER MODEL</div>
+        <div class="advice-hint">Run <code>/models</code> in OpenCode and pick one of these:</div>
+        <div id="advice-cheaper" class="model-list"></div>
+      </div>
+
+      <div class="advice-limit">
+        <span class="advice-limit-label">SESSION LIMIT</span>
+        <button id="advice-dec" class="step" title="Decrease">&minus;</button>
+        <span class="dollar">$</span>
+        <input type="text" id="advice-limit-input" class="limit" />
+        <button id="advice-inc" class="step" title="Increase">+</button>
+        <button id="advice-apply" class="ctl raise">APPLY</button>
+      </div>
+
+      <div class="advice-actions">
+        <button id="advice-allow" class="ctl allow">LET THIS ONE FINISH</button>
+        <button id="advice-double" class="ctl raise">DOUBLE IT</button>
+        <button id="advice-stop" class="ctl stop">STOP SESSION</button>
+        <button id="advice-disable" class="ctl">TURN ENFORCEMENT OFF</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== UNKNOWN PRICE MODAL ===== -->
+  <div id="price-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>SET MISSING PRICES</h3>
+        <button id="price-close" class="modal-close-btn">&times;</button>
+      </div>
+      <p class="modal-sub">
+        These models are not in the price table, so their spend counts as $0 and
+        is invisible to the session limit. Rates are USD per 1M tokens; the
+        values below are estimates you can correct.
+      </p>
+      <div id="price-list" class="model-list"></div>
+    </div>
+  </div>
+
+  <!-- ===== CHEAPER MODELS MODAL ===== -->
+  <div id="model-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Cheaper models</h3>
+        <button id="modal-close" class="modal-close-btn">&times;</button>
+      </div>
+      <p class="modal-sub">Ranked from your price table. Click a row to copy its id, then switch model in OpenCode.</p>
+      <div id="model-list" class="model-list"></div>
+    </div>
+  </div>
+
+  <!-- ===== RIGHT-CLICK CONTEXT MENU ===== -->
+  <div id="menu" class="ctxmenu hidden"></div>
+
+  <!-- budget warning toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- mode tooltip -->
+  <div id="tip" class="tooltip hidden"></div>
+
+  <script src="main.js"></script>
+</body>
+</html>

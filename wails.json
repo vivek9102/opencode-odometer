@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "OpenCode Odometer",
+  "outputfilename": "OpenCode_Odometer",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "VivekUjjwal",
+    "email": "vivek.ujjwal@adesso.in"
+  },
+  "info": {
+    "companyName": "Adesso",
+    "productName": "OpenCode Odometer",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright (c) 2026",
+    "comments": "Live spend meter and per-session budget enforcement for OpenCode"
+  }
+}
