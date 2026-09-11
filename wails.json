@@ -7,13 +7,13 @@
   "frontend:dev:watcher": "",
   "frontend:dev:serverUrl": "",
   "author": {
-    "name": "VivekUjjwal",
-    "email": "vivek.ujjwal@adesso.in"
+    "name": "viv9102",
+    "email": "vivek.ujjwal210@gmail.com"
   },
   "info": {
-    "companyName": "Adesso",
+    "companyName": "viv9102",
     "productName": "OpenCode Odometer",
-    "productVersion": "1.0.0",
+    "productVersion": "2.0.0",
     "copyright": "Copyright (c) 2026",
     "comments": "Live spend meter and per-session budget enforcement for OpenCode"
   }
