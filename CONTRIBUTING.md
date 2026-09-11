@@ -8,27 +8,33 @@ to stay that way.
 ```powershell
 git clone https://github.com/vivek9102/opencode-odometer.git
 cd opencode-odometer
-python opencode_monitor.py
+go run .
 ```
 
-No dependencies beyond the Python standard library (`tkinter` + `sqlite3`).
-PyInstaller is needed only to build the `.exe`.
+Requires Go (see `go.mod` for the version) and the Wails v2 CLI for a full
+build (`build_exe.bat`). The old Python implementation
+(`opencode_monitor.py`) has been retired; see the README for the current
+architecture.
+
+> **Note:** the rest of this document still describes the retired Python
+> implementation and is due for a rewrite. Treat the sections below as
+> historical until then.
 
 ## Running tests
 
 ```powershell
-python -m pytest tests\ -v
-# or, without pytest:
-python tests\test_pricing.py
+go test ./...
 ```
 
-Tests are pure logic — no GUI, no database, no network. Please keep them that
-way so they stay fast and runnable anywhere.
+Tests are pure logic — no GUI, no network. Please keep them that way so they
+stay fast and runnable anywhere.
 
 ## Before opening a PR
 
-- [ ] `python tests\test_pricing.py` passes
+- [ ] `go test ./...` passes
+- [ ] `go vet ./...` passes
 - [ ] `node --check plugin\odometer.js` passes
+- [ ] `node --check frontend\dist\main.js` passes
 - [ ] No private data in the diff — see below
 
 ### Never commit
@@ -48,18 +54,10 @@ git diff --cached -U0 | Select-String -Pattern "ses_[a-zA-Z0-9]{20}"
 
 ## Most useful contribution: macOS / Linux support
 
-Currently Windows-only. The blockers are small and localised:
-
-| Location | Issue |
-|---|---|
-| `pid_alive()` | uses `ctypes.windll.kernel32`; needs an `os.kill(pid, 0)` branch |
-| `TASKBAR = 56` | Windows dock offset |
-| `_set_frameless()` | `overrideredirect()` behaves differently on macOS |
-| `plugin/odometer.js` | early-returns on `process.platform !== "win32"` |
-| `launch()` | spawns `.exe` / `pythonw` |
-
-The data layer already resolves XDG paths and locates `opencode.db` across
-platforms, so most of the groundwork is done.
+> This section describes the retired Python implementation's blockers and is
+> stale for the current Go/Wails app. Superseded pending the task 3 rewrite;
+> `internal/lock` already has a build-tagged Unix implementation
+> (`lock_unix.go`) alongside the Windows one, which is a starting point.
 
 ## Design principles
 

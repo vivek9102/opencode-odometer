@@ -9,41 +9,29 @@ on:
 jobs:
   test:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.9", "3.12"]
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: ${{ matrix.python }}
+          go-version-file: go.mod
 
-      - name: Compile check
-        run: python -m compileall -q opencode_monitor.py tools tests
+      - name: Vet
+        run: go vet ./...
 
-      - name: Run tests
-        run: python tests/test_pricing.py
+      # Runs internal/prices' TestRepoPricesJSONIsValid alongside everything
+      # else. That test loads the real prices.json at the repo root (not a
+      # fixture) and checks it has models, a resolvable reference_model, and
+      # non-negative rates - the same invariants a dedicated Python step used
+      # to check separately before the app was rewritten in Go.
+      - name: Test
+        run: go test -count=1 ./...
 
-      - name: Validate prices.json
-        run: |
-          python -c "
-          import json, sys
-          d = json.load(open('prices.json', encoding='utf-8'))
-          m = d.get('models', {})
-          assert m, 'no models in prices.json'
-          ref = d.get('reference_model')
-          assert ref in m, f'reference_model {ref} missing from table'
-          bad = [k for k, v in m.items()
-                 if not all(isinstance(v.get(f, 0), (int, float))
-                            for f in ('input','output','cache_read','cache_write'))]
-          assert not bad, f'non-numeric rates: {bad[:5]}'
-          print(f'ok: {len(m)} models, reference={ref}')
-          "
+      - name: Build
+        run: go build ./...
 
-  plugin:
+  frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +40,11 @@ jobs:
           node-version: "20"
       - name: Syntax check plugin
         run: node --check plugin/odometer.js
+      # frontend/dist/main.js is hand-edited (no build/bundle step), so a
+      # syntax slip has nothing else to catch it before it ships embedded in
+      # the binary via //go:embed all:frontend/dist.
+      - name: Syntax check frontend
+        run: node --check frontend/dist/main.js
 
   privacy:
     runs-on: ubuntu-latest
