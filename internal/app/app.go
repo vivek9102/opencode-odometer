@@ -164,8 +164,7 @@ func New(cfg Config) (*App, error) {
 	a.graceUsed = a.state.GraceUsed
 	a.loadState()
 	// Repair records that an older classifier charged even though their model
-	// key is now recognized as free. Do not broadly reprice paid history here:
-	// catalog changes remain an explicit Reload/Refresh Prices operation.
+	// key is now recognized as free. Do not broadly reprice paid history here.
 	a.reclassifyFreeModels()
 	a.healTripBaseline()
 
@@ -533,11 +532,36 @@ func (a *App) ApplyMessage(m opencode.Message) bool {
 	}
 
 	quote := a.PreviewPrice(key, m.Tokens.Input, m.Tokens.Output, m.Tokens.Cache.Read, m.Tokens.Cache.Write, m.Cost)
+
+	// OpenCode and the plugin replay completed messages during backfill. If the
+	// token totals and reported cost are unchanged, retain the price decision
+	// captured on the original record. Otherwise changing a local price today
+	// would silently rewrite yesterday's spend the next time that message was
+	// replayed. A genuinely updated/in-progress message still uses current
+	// pricing, and a newly reported non-zero event cost is still accepted.
+	a.Ledger.RLock()
+	previous, existed := a.Ledger.Messages[m.ID]
+	a.Ledger.RUnlock()
+	preserveHistoricalPrice := existed && previous.TokensIn == m.Tokens.Input &&
+		previous.TokensOut == m.Tokens.Output &&
+		previous.CacheRead == m.Tokens.Cache.Read &&
+		previous.CacheWrite == m.Tokens.Cache.Write &&
+		previous.ReportedCost == m.Cost
+	if preserveHistoricalPrice {
+		quote.Cost = previous.Cost
+		quote.Source = previous.CostSource
+		quote.Free = previous.Free
+		quote.Unknown = previous.Unknown
+		quote.Estimated = previous.Estimated
+	}
 	free := quote.Free
 	cost := quote.Cost
 	saved := 0.0
 	if free {
 		saved = a.Prices.ShadowCost(key, m.Tokens.Input, m.Tokens.Output, m.Tokens.Cache.Read, m.Tokens.Cache.Write)
+	}
+	if preserveHistoricalPrice {
+		saved = previous.Saved
 	}
 
 	a.Ledger.RLock()
@@ -605,7 +629,8 @@ func (a *App) ApplyMessage(m opencode.Message) bool {
 	return changed
 }
 
-// PendingPriceSuggestions returns unconfigured seen models with their best suggested rate.
+// PendingPriceSuggestions returns prices awaiting confirmation and saved local
+// prices, so users can revisit an unknown-provider price at any time.
 func (a *App) PendingPriceSuggestions() []prices.PriceSuggestion {
 	a.mu.RLock()
 	var seen []string
@@ -632,9 +657,9 @@ func (a *App) IgnorePrice(key string) {
 	a.SaveState()
 }
 
-// SaveOverride persists an explicit user correction. Unlike catalogue reloads,
-// this intentionally corrects prior records for this one model: the user has
-// reviewed the rate and chosen it as authoritative.
+// SaveOverride persists an explicit user price for future messages. Completed
+// ledger records are immutable: a later price correction must not rewrite what
+// the odometer showed at the time.
 func (a *App) SaveOverride(key string, rate prices.Rate) error {
 	overlay := a.cfg.OverlayFile
 	if overlay == "" {
@@ -643,29 +668,9 @@ func (a *App) SaveOverride(key string, rate prices.Rate) error {
 	if err := a.Prices.SaveOverride(overlay, key, rate); err != nil {
 		return err
 	}
-	// Reprice all messages in ledger with updated rates
-	a.Ledger.Lock()
-	for mid, rec := range a.Ledger.Messages {
-		recKey := prices.NormalizeKey(rec.Provider, rec.Model)
-		if recKey == key {
-			e := a.Prices.Entry(recKey)
-			rec.Free = e.Free
-			rec.Cost = a.Prices.Cost(recKey, rec.TokensIn, rec.TokensOut, rec.CacheRead, rec.CacheWrite)
-			rec.Saved = 0
-			rec.Unknown = false
-			rec.Estimated = false
-			rec.CostSource = "local override"
-			if e.Free {
-				rec.Saved = a.Prices.ShadowCost(recKey, rec.TokensIn, rec.TokensOut, rec.CacheRead, rec.CacheWrite)
-				rec.CostSource = "local override (free)"
-			}
-			a.Ledger.Messages[mid] = rec
-		}
-	}
-	a.Ledger.RecomputeLocked()
-	a.Ledger.Unlock()
-
-	a.absorbAndPublish()
+	a.mu.Lock()
+	delete(a.state.IgnoredPrices, key)
+	a.mu.Unlock()
 	a.SaveState()
 	return nil
 }

@@ -75,11 +75,14 @@ func TestPendingSuggestionsOnlyUnknown(t *testing.T) {
 	if !got[0].IsUnknown {
 		t.Error("suggestion should be flagged unknown")
 	}
+	if !got[0].NeedsConfirmation {
+		t.Error("new suggestion should require confirmation")
+	}
 }
 
-// TestPendingSuggestionsSkipsLocalOverrides ensures answering the prompt stops
-// it being asked again.
-func TestPendingSuggestionsSkipsLocalOverrides(t *testing.T) {
+// TestPendingSuggestionsKeepsLocalOverridesEditable ensures a saved price stops
+// being a confirmation prompt but remains available for later updates.
+func TestPendingSuggestionsKeepsLocalOverridesEditable(t *testing.T) {
 	p := writePrices(t, sonnetRates(), "acme/sonnet")
 	overlay := filepath.Join(t.TempDir(), "prices.local.json")
 	b, err := New(p, overlay)
@@ -93,8 +96,12 @@ func TestPendingSuggestionsSkipsLocalOverrides(t *testing.T) {
 	if err := b.SaveOverride(overlay, "mystery/model-x", Rate{Name: "x", Input: 1, Output: 2}); err != nil {
 		t.Fatalf("SaveOverride: %v", err)
 	}
-	if got := b.PendingSuggestions([]string{"mystery/model-x"}); len(got) != 0 {
-		t.Errorf("model with a saved override must not be suggested again: %+v", got)
+	got := b.PendingSuggestions([]string{"mystery/model-x"})
+	if len(got) != 1 || !got[0].IsLocal || got[0].NeedsConfirmation {
+		t.Errorf("saved override should remain editable without prompting: %+v", got)
+	}
+	if got[0].SuggestedRate.Input != 1 || got[0].SuggestedRate.Output != 2 {
+		t.Errorf("editable override has wrong rates: %+v", got[0])
 	}
 }
 
@@ -307,7 +314,7 @@ func TestEstimatedFallbackIsOfferedForConfirmation(t *testing.T) {
 	}
 
 	got := b.PendingSuggestions([]string{"companyhub/claude-test"})
-	if len(got) != 1 || got[0].IsUnknown || got[0].SuggestedRate.Output != 10 {
+	if len(got) != 1 || got[0].IsUnknown || !got[0].NeedsConfirmation || got[0].SuggestedRate.Output != 10 {
 		t.Fatalf("estimated private-provider rate should be confirmable: %+v", got)
 	}
 }

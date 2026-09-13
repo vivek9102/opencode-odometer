@@ -82,6 +82,12 @@ func (a *App) reclassifyFreeModels() {
 			continue
 		}
 		key := prices.NormalizeKey(rec.Provider, rec.Model)
+		// A user-authored free price is prospective, just like every other
+		// local price change. This repair is only for built-in classification
+		// improvements such as the sovereign/free naming convention.
+		if a.Prices.IsLocal(key) {
+			continue
+		}
 		if !a.Prices.IsFree(key) {
 			continue
 		}

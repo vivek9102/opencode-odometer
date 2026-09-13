@@ -96,6 +96,8 @@ export namespace prices {
 	    suggested_rate: Rate;
 	    source: string;
 	    is_unknown: boolean;
+	    is_local: boolean;
+	    needs_confirmation: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new PriceSuggestion(source);
@@ -107,6 +109,8 @@ export namespace prices {
 	        this.suggested_rate = this.convertValues(source["suggested_rate"], Rate);
 	        this.source = source["source"];
 	        this.is_unknown = source["is_unknown"];
+	        this.is_local = source["is_local"];
+	        this.needs_confirmation = source["needs_confirmation"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

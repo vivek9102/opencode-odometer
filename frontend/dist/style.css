@@ -305,17 +305,10 @@ select {
   font-family: "Consolas", monospace; font-size: 11px; padding: 2px 4px; border-radius: 2px;
 }
 .price-actions { display: flex; flex-direction: column; gap: 4px; }
-.sim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-.sim-grid label { display: flex; flex-direction: column; gap: 3px; font: 10px var(--font-mono); color: var(--dim); }
-.sim-grid label:first-child { grid-column: 1 / -1; }
-.sim-grid input {
-  background: #181820; border: 1px solid var(--edge); color: var(--text-hi);
-  padding: 6px; border-radius: 2px; font-family: var(--font-mono);
-}
-.sim-grid input:focus { outline: none; border-color: #2563eb; }
-.sim-result { margin-top: 10px; padding: 9px; min-height: 36px; background: #181820;
-  border: 1px solid var(--edge); color: var(--text-hi); font: 11px/1.5 var(--font-mono);
-  white-space: pre-line; }
+.cache-toggle { display: block; margin-top: 7px; color: var(--text-mid);
+  font: 10px var(--font-mono); cursor: pointer; }
+.cache-toggle input { vertical-align: middle; }
+.cache-note { margin-top: 3px; color: var(--dim); font: 9px var(--font-ui); }
 .rate-in:focus { outline: none; border-color: #2563eb; }
 
 /* provider badge: quieter than the tier tag, since it identifies rather than ranks */

@@ -378,15 +378,8 @@ $("bd-reset").addEventListener("click", () => {
     Svc().ResetTrip().then(() => toast("Trip reset", "ok"));
   }
 });
-$("bd-reload").addEventListener("click", () => {
-  const p = Svc().ReloadPrices();
-  if (p && p.then) {
-    p.then(() => toast("Local prices applied to future usage", "ok"))
-     .catch((err) => toast("Reload failed: " + err, "over"));
-  }
-});
-// Download the latest catalogue. Neither catalog action rewrites completed
-// messages; only explicit user overrides can correct history.
+// Download the latest catalogue for future messages. Recorded history remains
+// fixed, just like it does when a user saves an unknown-provider price.
 $("bd-update-prices").addEventListener("click", () => {
   toast("Fetching latest price catalog\u2026", "ok");
   Svc().RefreshPrices()
@@ -431,10 +424,13 @@ const priceModal = $("price-modal");
 function refreshUnpriced() {
   if (!window.go || !window.go.wservice) return;
   Svc().PendingPriceSuggestions().then((list) => {
-    const n = (list || []).length;
+    const prices = list || [];
+    const n = prices.filter((s) => s.needs_confirmation).length;
     const btn = $("bd-unpriced");
-    btn.classList.toggle("hidden", n === 0);
-    if (n > 0) btn.textContent = n === 1 ? "1 PRICE TO CONFIRM" : n + " PRICES TO CONFIRM";
+    btn.classList.toggle("hidden", prices.length === 0);
+    btn.textContent = n > 0
+      ? (n === 1 ? "1 PRICE TO CONFIRM" : n + " PRICES TO CONFIRM")
+      : "MODEL PRICES";
   }).catch(() => { /* backend not ready */ });
 }
 
@@ -445,7 +441,7 @@ function openPriceModal() {
     if (!list || !list.length) {
       const d = document.createElement("div");
       d.className = "model-desc";
-      d.textContent = "Every model in use has a price. Nothing to set.";
+      d.textContent = "No unknown-provider prices have been used yet.";
       wrap.appendChild(d);
     }
     for (const sug of list || []) {
@@ -471,15 +467,14 @@ function openPriceModal() {
       desc.className = "model-desc";
       desc.textContent = sug.source || "unknown model";
 
-      // Pre-filled so the common case is one click, not four fields.
+      // Input/output are the common adjustment. Cache keeps the matched
+      // original provider's rates unless the user explicitly opens it.
       const row = document.createElement("div");
       row.className = "rate-row";
       const fields = {};
       for (const f of [
         { k: "input", label: "in" },
         { k: "output", label: "out" },
-        { k: "cache_read", label: "c.read" },
-        { k: "cache_write", label: "c.write" },
       ]) {
         const l = document.createElement("label");
         l.textContent = f.label;
@@ -492,14 +487,54 @@ function openPriceModal() {
         row.appendChild(inp);
       }
 
+      const cacheToggle = document.createElement("label");
+      cacheToggle.className = "cache-toggle";
+      const cacheCheck = document.createElement("input");
+      cacheCheck.type = "checkbox";
+      cacheToggle.appendChild(cacheCheck);
+      cacheToggle.appendChild(document.createTextNode(" customize cache prices"));
+
+      const cacheRow = document.createElement("div");
+      cacheRow.className = "rate-row cache-rate-row hidden";
+      for (const f of [
+        { k: "cache_read", label: "cache read" },
+        { k: "cache_write", label: "cache write" },
+      ]) {
+        const l = document.createElement("label");
+        l.textContent = f.label;
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "rate-in";
+        inp.value = String(r[f.k] !== undefined ? r[f.k] : 0);
+        fields[f.k] = inp;
+        cacheRow.appendChild(l);
+        cacheRow.appendChild(inp);
+      }
+      cacheCheck.addEventListener("change", () => {
+        cacheRow.classList.toggle("hidden", !cacheCheck.checked);
+      });
+
+      const cacheNote = document.createElement("div");
+      cacheNote.className = "cache-note";
+      if (sug.is_local) {
+        cacheNote.textContent = "Cache keeps the saved values unless customized.";
+      } else if (String(sug.source || "").startsWith("estimate from ")) {
+        cacheNote.textContent = "Cache uses " + sug.source.slice("estimate from ".length) + " unless customized.";
+      } else {
+        cacheNote.textContent = "Cache uses the suggested family defaults unless customized.";
+      }
+
       info.appendChild(title);
       info.appendChild(desc);
       info.appendChild(row);
+      info.appendChild(cacheToggle);
+      info.appendChild(cacheRow);
+      info.appendChild(cacheNote);
 
       const save = document.createElement("button");
       save.className = "model-pick-btn";
-      save.textContent = sug.is_unknown ? "SAVE RATES" : "ACCEPT / SAVE";
-      save.title = "Save an authoritative local rate and correct past usage for this model.";
+      save.textContent = sug.is_local ? "UPDATE PRICE" : "USE / SAVE";
+      save.title = "Use this local price for new messages. Recorded history stays unchanged.";
       save.addEventListener("click", () => {
         const rate = { name: bareModel(sug.key), family: r.family || "" };
         let bad = false;
@@ -522,7 +557,7 @@ function openPriceModal() {
       free.className = "model-pick-btn";
       free.style.background = "#166534";
       free.textContent = "MARK FREE";
-      free.title = "Save this exact provider/model as free and correct its past usage to $0.";
+      free.title = "Treat new messages from this exact provider/model as free. History stays unchanged.";
       free.addEventListener("click", () => {
         const rate = {
           name: bareModel(sug.key), family: r.family || "", free: true,
@@ -555,7 +590,7 @@ function openPriceModal() {
       btns.className = "price-actions";
       btns.appendChild(save);
       btns.appendChild(free);
-      btns.appendChild(skip);
+      if (!sug.is_local) btns.appendChild(skip);
 
       card.appendChild(info);
       card.appendChild(btns);
@@ -566,32 +601,6 @@ function openPriceModal() {
 }
 
 function closePriceModal() { priceModal.classList.add("hidden"); }
-
-// ---- no-charge pricing simulator ----
-const pricingTestModal = $("pricing-test-modal");
-
-function openPricingTest() {
-  const rows = snapshot && snapshot.rows ? snapshot.rows : [];
-  if (rows.length && rows[0].key) $("pt-model").value = rows[0].key;
-  $("pricing-test-result").textContent = "No API call will be made and the real total will not change.";
-  pricingTestModal.classList.remove("hidden");
-}
-
-function closePricingTest() { pricingTestModal.classList.add("hidden"); }
-
-$("pricing-test-run").addEventListener("click", () => {
-  const key = $("pt-model").value.trim();
-  const value = (id) => Math.max(0, Number($(id).value) || 0);
-  if (!key) { toast("Enter provider/model", "over"); return; }
-  Svc().PreviewPrice(key, value("pt-in"), value("pt-out"), value("pt-cr"), value("pt-cw"), value("pt-reported"))
-    .then((q) => {
-      const flag = q.free ? "FREE" : q.unknown ? "UNKNOWN — $0 UNTIL CONFIRMED" : q.estimated ? "ESTIMATE" : "AUTHORITATIVE";
-      const rates = `in $${Number(q.input_rate || 0).toFixed(4)} / out $${Number(q.output_rate || 0).toFixed(4)} per 1M`;
-      $("pricing-test-result").textContent =
-        `$${Number(q.cost || 0).toFixed(6)}  ·  ${flag}\n${q.source || "unknown source"}  ·  ${rates}`;
-    })
-    .catch((err) => toast("Pricing test failed: " + err, "over"));
-});
 
 // Show how old the price table is. Rates drift, and a table with no stated age
 // implies it is current when it may be months old.
@@ -620,9 +629,6 @@ function refreshPricesAge() {
 $("bd-unpriced").addEventListener("click", openPriceModal);
 $("price-close").addEventListener("click", closePriceModal);
 priceModal.querySelector(".modal-backdrop").addEventListener("click", closePriceModal);
-$("bd-test-pricing").addEventListener("click", openPricingTest);
-$("pricing-test-close").addEventListener("click", closePricingTest);
-pricingTestModal.querySelector(".modal-backdrop").addEventListener("click", closePricingTest);
 
 // ---- cheaper models modal ----
 const modal = $("model-modal");
@@ -1020,7 +1026,6 @@ window.addEventListener("keydown", (e) => {
     if (!menu.classList.contains("hidden")) closeMenu();
     else if (!advice.classList.contains("hidden")) closeAdvice();
     else if (!priceModal.classList.contains("hidden")) closePriceModal();
-    else if (!pricingTestModal.classList.contains("hidden")) closePricingTest();
     else if (!modal.classList.contains("hidden")) closeModelModal();
     else setView(false);
   } else if (e.key === "F2") {

@@ -478,7 +478,8 @@ func (s *Service) SavePosition(x, y int) {
 	}
 }
 
-// PendingPriceSuggestions returns unconfigured seen models.
+// PendingPriceSuggestions returns unknown-provider prices that need review and
+// saved local prices that remain editable.
 func (s *Service) PendingPriceSuggestions() []prices.PriceSuggestion {
 	if s.App == nil {
 		return nil

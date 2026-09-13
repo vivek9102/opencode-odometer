@@ -32,10 +32,12 @@ type Rate struct {
 
 // PriceSuggestion bundles an unconfigured model key with its best suggested rate.
 type PriceSuggestion struct {
-	Key           string `json:"key"`
-	SuggestedRate Rate   `json:"suggested_rate"`
-	Source        string `json:"source"`
-	IsUnknown     bool   `json:"is_unknown"`
+	Key               string `json:"key"`
+	SuggestedRate     Rate   `json:"suggested_rate"`
+	Source            string `json:"source"`
+	IsUnknown         bool   `json:"is_unknown"`
+	IsLocal           bool   `json:"is_local"`
+	NeedsConfirmation bool   `json:"needs_confirmation"`
 }
 
 // document is the on-disk shape of prices.json / prices.local.json.
@@ -390,7 +392,9 @@ func candidateRank(key, family, target string) [3]int {
 	return [3]int{familyPenalty, canonicalPenalty, delta}
 }
 
-// PendingSuggestions returns suggestions for all seen model keys not explicitly in local overrides.
+// PendingSuggestions returns prices that need confirmation plus saved local
+// prices that the user may edit again. Exact catalogue entries are omitted:
+// they are maintained by the catalogue rather than by the user.
 func (b *Book) PendingSuggestions(seenKeys []string) []PriceSuggestion {
 	// Write lock: resolving an entry records unknown keys, and RWMutex is not
 	// reentrant, so an RLock here plus Entry's Lock would deadlock.
@@ -400,6 +404,10 @@ func (b *Book) PendingSuggestions(seenKeys []string) []PriceSuggestion {
 	var out []PriceSuggestion
 	for _, k := range seenKeys {
 		if b.isLocalLocked(k) {
+			r := b.entryLocked(k)
+			out = append(out, PriceSuggestion{
+				Key: k, SuggestedRate: r, Source: "saved local price", IsLocal: true,
+			})
 			continue
 		}
 		r := b.entryLocked(k)
@@ -422,10 +430,11 @@ func (b *Book) PendingSuggestions(seenKeys []string) []PriceSuggestion {
 			}
 		}
 		out = append(out, PriceSuggestion{
-			Key:           k,
-			SuggestedRate: rate,
-			Source:        src,
-			IsUnknown:     r.Unknown,
+			Key:               k,
+			SuggestedRate:     rate,
+			Source:            src,
+			IsUnknown:         r.Unknown,
+			NeedsConfirmation: true,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })

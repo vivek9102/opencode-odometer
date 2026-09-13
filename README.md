@@ -61,13 +61,12 @@ meaningless. See [Private pricing](#private-pricing).
 - **Free-model savings** — models ending `-free` or containing `sovereign` cost
   nothing and accrue a "would have cost" figure.
 - **Unknown-model prompt** — a model with no rate contributes $0 and is
-  invisible to the budget, so the app surfaces it and offers a family-median
-  estimate to correct.
+  invisible to the budget, so the app surfaces it and offers the best public
+  match (or a family-median fallback). Cache prices inherit from that public
+  match unless you explicitly customize them. Saved prices remain editable.
 - **Explainable hybrid accounting** — an explicit local/free setting wins,
   then a non-zero OpenCode event cost, then exact catalog pricing, then a
   deterministic cross-provider estimate. Each ledger record keeps its source.
-- **No-charge pricing test** — simulate paid token counts without calling a
-  model, consuming provider credit, or changing the real ledger.
 - **CSV export** of every priced message.
 
 ---
@@ -221,9 +220,8 @@ limit can still rescue the session.
 | Cycle dock position | <kbd>F2</kbd> or `DOCK` |
 | TRIP / TOTAL | Click the odometer or `TRIP / TOTAL` |
 | Reset trip | `RESET TRIP` |
-| Apply local files to future usage | `APPLY LOCAL PRICES` |
 | Download catalog for future usage | `UPDATE CATALOG` |
-| Simulate paid-token pricing, no charge | `TEST PRICING` |
+| Review or update unknown-provider prices | `MODEL PRICES` / `PRICE TO CONFIRM` |
 | Cheaper alternatives | `CHEAPER MODELS` |
 | Abort the active session | `STOP SESSION` |
 | Export ledger | `EXPORT CSV` |

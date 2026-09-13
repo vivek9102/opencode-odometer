@@ -3,9 +3,11 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/vivek9102/opencode-odometer/internal/ledger"
+	"github.com/vivek9102/opencode-odometer/internal/prices"
 )
 
 func TestViewModeDefaultsToTrip(t *testing.T) {
@@ -103,6 +105,59 @@ func TestReloadPricesKeepsHistoryAndPricesFutureMessages(tt *testing.T) {
 	newMessageCost := a.Ledger.Messages["m2"].Cost
 	if newMessageCost <= before {
 		tt.Fatalf("future message did not use new rates: old message %v, new message %v", before, newMessageCost)
+	}
+}
+
+func TestOverrideKeepsHistoryReplayStableAndPricesFutureMessages(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	a.cfg.OverlayFile = filepath.Join(t.TempDir(), "prices.local.json")
+
+	old := asst("old", "s1", "companyhub", "sonnet", 0)
+	if !a.ApplyMessage(old) {
+		t.Fatal("expected first message to enter ledger")
+	}
+	before := a.Ledger.TotalCost
+
+	newRate := prices.Rate{
+		Name: "CompanyHub Sonnet", Family: "", Input: 6, Output: 30,
+		CacheRead: 0.6, CacheWrite: 7.5,
+	}
+	if err := a.SaveOverride("companyhub/sonnet", newRate); err != nil {
+		t.Fatal(err)
+	}
+	if a.Ledger.TotalCost != before {
+		t.Fatalf("saving a price rewrote history: before=%v after=%v", before, a.Ledger.TotalCost)
+	}
+
+	// Backfill replays completed messages; it must not apply today's price to
+	// a message already recorded under yesterday's rate.
+	if a.ApplyMessage(old) {
+		t.Fatal("unchanged historical replay should not alter the ledger")
+	}
+	if a.Ledger.TotalCost != before {
+		t.Fatalf("historical replay changed total: before=%v after=%v", before, a.Ledger.TotalCost)
+	}
+
+	if !a.ApplyMessage(asst("new", "s1", "companyhub", "sonnet", 0)) {
+		t.Fatal("expected future message to enter ledger")
+	}
+	if got := a.Ledger.Messages["new"].Cost; got <= before {
+		t.Fatalf("future message did not use updated rates: old=%v new=%v", before, got)
+	}
+}
+
+func TestLocalFreeOverrideDoesNotReclassifyHistory(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	a.cfg.OverlayFile = filepath.Join(t.TempDir(), "prices.local.json")
+	a.ApplyMessage(asst("old", "s1", "companyhub", "sonnet", 0))
+	before := a.Ledger.Messages["old"]
+
+	if err := a.SaveOverride("companyhub/sonnet", prices.Rate{Name: "Sonnet", Free: true}); err != nil {
+		t.Fatal(err)
+	}
+	a.reclassifyFreeModels()
+	if got := a.Ledger.Messages["old"]; got.Free || got.Cost != before.Cost {
+		t.Fatalf("local free setting rewrote history: before=%+v after=%+v", before, got)
 	}
 }
 
