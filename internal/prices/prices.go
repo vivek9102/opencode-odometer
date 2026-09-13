@@ -259,9 +259,9 @@ func CleanModelName(key string) string {
 // Entry returns the rate for a model key following the strict 5-step lookup hierarchy:
 //  1. Exact entry in prices.local.json (user override)
 //  2. Exact entry in prices.json (models.dev catalog)
-//  3. Cross-provider fallback: match catalog entry from ANY provider with same name/family,
+//  3. LooksFree() convention match -> $0, Free: true
+//  4. Cross-provider fallback: match catalog entry from ANY provider with same name/family,
 //     flagged as "estimate from <source-provider>"
-//  4. LooksFree() convention match -> $0, Free: true
 //  5. Unknown -> $0, Unknown: true, and added to seen-models tracking
 func (b *Book) Entry(key string) Rate {
 	b.mu.Lock()
@@ -296,46 +296,9 @@ func (b *Book) entryLocked(key string) Rate {
 		}
 	}
 
-	// 3. Cross-provider fallback
-	cleanTarget := CleanModelName(key)
-	targetFamily := InferFamily(key)
-
-	// 3a. Exact base model name match across all providers
-	for k, r := range b.catalogModels {
-		if CleanModelName(k) == cleanTarget {
-			res := r
-			res.Name = key
-			res.Source = "estimate from " + k
-			res.Unknown = false
-			return res
-		}
-	}
-
-	// 3b. Partial slug match with same family tiebreak
-	var bestMatch Rate
-	var bestKey string
-	for k, r := range b.catalogModels {
-		cleanK := CleanModelName(k)
-		if strings.Contains(cleanK, cleanTarget) || strings.Contains(cleanTarget, cleanK) {
-			if targetFamily != "" && r.Family == targetFamily {
-				bestMatch = r
-				bestKey = k
-				break
-			} else if bestKey == "" {
-				bestMatch = r
-				bestKey = k
-			}
-		}
-	}
-	if bestKey != "" {
-		res := bestMatch
-		res.Name = key
-		res.Source = "estimate from " + bestKey
-		res.Unknown = false
-		return res
-	}
-
-	// 4. LooksFree convention match
+	// 3. A free marker on the actual model key must win before fuzzy matching.
+	// Otherwise a key such as "companyhub/deepseek-v4-flash-sovereign" is
+	// incorrectly assigned the paid rate for "opencode/deepseek-v4-flash".
 	if LooksFree(key) {
 		return Rate{
 			Name:      key,
@@ -344,9 +307,87 @@ func (b *Book) entryLocked(key string) Rate {
 		}
 	}
 
+	// 4. Cross-provider fallback. Collect and sort matches before choosing one:
+	// Go deliberately randomises map iteration, and taking the first match made
+	// the same private-provider model alternate between different public rates.
+	cleanTarget := CleanModelName(key)
+	targetFamily := InferFamily(key)
+
+	// 4a. Exact base model name match across all providers.
+	var exact []string
+	for k := range b.catalogModels {
+		if CleanModelName(k) == cleanTarget {
+			exact = append(exact, k)
+		}
+	}
+	if len(exact) > 0 {
+		sortCatalogCandidates(exact, targetFamily, cleanTarget)
+		bestKey := exact[0]
+		res := b.catalogModels[bestKey]
+		res.Name = key
+		res.Source = "estimate from " + bestKey
+		res.Unknown = false
+		return res
+	}
+
+	// 4b. Partial slug match, ranked deterministically by family, canonical
+	// provider, closeness of the model name, then lexical key.
+	var partial []string
+	for k := range b.catalogModels {
+		cleanK := CleanModelName(k)
+		if strings.Contains(cleanK, cleanTarget) || strings.Contains(cleanTarget, cleanK) {
+			partial = append(partial, k)
+		}
+	}
+	if len(partial) > 0 {
+		sortCatalogCandidates(partial, targetFamily, cleanTarget)
+		bestKey := partial[0]
+		res := b.catalogModels[bestKey]
+		res.Name = key
+		res.Source = "estimate from " + bestKey
+		res.Unknown = false
+		return res
+	}
+
 	// 5. Unknown -> $0, Unknown: true
 	b.Unknown[key] = true
 	return Rate{Name: key, Unknown: true}
+}
+
+func sortCatalogCandidates(keys []string, family, target string) {
+	sort.Slice(keys, func(i, j int) bool {
+		a, b := keys[i], keys[j]
+		ra, rb := candidateRank(a, family, target), candidateRank(b, family, target)
+		for n := range ra {
+			if ra[n] != rb[n] {
+				return ra[n] < rb[n]
+			}
+		}
+		return strings.ToLower(a) < strings.ToLower(b)
+	})
+}
+
+func candidateRank(key, family, target string) [3]int {
+	keyFamily := InferFamily(key)
+	familyPenalty := 1
+	if family != "" && keyFamily == family {
+		familyPenalty = 0
+	}
+	canonicalPenalty := 1
+	provider := strings.ToLower(strings.SplitN(key, "/", 2)[0])
+	canonical := map[string]string{
+		"claude": "anthropic", "openai": "openai", "gemini": "google",
+		"qwen": "alibaba", "deepseek": "deepseek", "mistral": "mistral",
+		"nova": "amazon-bedrock",
+	}[family]
+	if canonical != "" && provider == canonical {
+		canonicalPenalty = 0
+	}
+	delta := len(CleanModelName(key)) - len(target)
+	if delta < 0 {
+		delta = -delta
+	}
+	return [3]int{familyPenalty, canonicalPenalty, delta}
 }
 
 // PendingSuggestions returns suggestions for all seen model keys not explicitly in local overrides.
@@ -358,37 +399,57 @@ func (b *Book) PendingSuggestions(seenKeys []string) []PriceSuggestion {
 
 	var out []PriceSuggestion
 	for _, k := range seenKeys {
-		if _, isLocal := b.localModels[k]; isLocal {
+		if b.isLocalLocked(k) {
 			continue
 		}
 		r := b.entryLocked(k)
-		// Only models that cannot be priced are worth asking about. Returning
-		// every seen model made this a list of things that already work, which
-		// is why no caller could use it without re-filtering.
-		//
-		// Unknown models are not merely undisplayed: they contribute $0 to the
-		// session total, so spend on them is invisible to budget enforcement.
-		if !r.Unknown {
+		// Unknown models hide spend; cross-provider rates are useful but still
+		// estimates. Both deserve a one-time confirmation from the user.
+		isEstimate := strings.HasPrefix(r.Source, "estimate from ")
+		if !r.Unknown && !isEstimate {
 			continue
 		}
 		// An unknown entry carries no numbers, so offer the median rate of its
 		// family as a starting point. A wrong-but-plausible figure the user can
 		// correct beats an empty box: it makes the cost visible to the budget
 		// immediately, and the family is usually the right order of magnitude.
-		rate, src := r, "unknown model"
-		if guess, from, ok := b.guessFromFamilyLocked(k); ok {
-			rate = guess
-			src = "estimated from " + from
+		rate, src := r, r.Source
+		if r.Unknown {
+			src = "unknown model"
+			if guess, from, ok := b.guessFromFamilyLocked(k); ok {
+				rate = guess
+				src = "estimated from " + from
+			}
 		}
 		out = append(out, PriceSuggestion{
 			Key:           k,
 			SuggestedRate: rate,
 			Source:        src,
-			IsUnknown:     true,
+			IsUnknown:     r.Unknown,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
+}
+
+// IsLocal reports whether a key has a user-authored overlay rate. Local
+// overrides are authoritative and intentionally beat provider-reported cost.
+func (b *Book) IsLocal(key string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.isLocalLocked(key)
+}
+
+func (b *Book) isLocalLocked(key string) bool {
+	if _, ok := b.localModels[key]; ok {
+		return true
+	}
+	for k := range b.localModels {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // guessFromFamilyLocked proposes a rate for an unpriced model from the median
@@ -537,4 +598,3 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
-

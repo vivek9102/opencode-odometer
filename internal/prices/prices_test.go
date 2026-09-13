@@ -161,6 +161,26 @@ func TestFreeDetectionBySuffix(t *testing.T) {
 	}
 }
 
+func TestFreeMarkerWinsBeforeCrossProviderFallback(t *testing.T) {
+	primary := writePrices(t, map[string]Rate{
+		"opencode/deepseek-v4-flash": {
+			Name: "DeepSeek V4 Flash", Family: "deepseek", Input: 0.14, Output: 0.28,
+		},
+	}, "opencode/deepseek-v4-flash")
+	b, err := New(primary, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r := b.Entry("companyhub/deepseek-v4-flash-sovereign")
+	if !r.Free || !r.Sovereign {
+		t.Fatalf("sovereign model matched a paid fallback: %+v", r)
+	}
+	if got := b.Cost("companyhub/deepseek-v4-flash-sovereign", 1_000_000, 1_000_000, 0, 0); got != 0 {
+		t.Errorf("sovereign model cost = %v, want 0", got)
+	}
+}
+
 func TestReferenceModelDrivesSavings(t *testing.T) {
 	b := newTestBook(t)
 	almostEqual(t, b.ShadowCost("x/llama-free", 1_000_000, 100_000, 0, 0), 4.50)
@@ -258,6 +278,40 @@ func TestCrossProviderFallback(t *testing.T) {
 	}
 }
 
+func TestCrossProviderFallbackIsDeterministic(t *testing.T) {
+	primary := writePrices(t, map[string]Rate{
+		"azure/gpt-test":      {Family: "openai", Input: 9, Output: 90},
+		"openai/gpt-test":     {Family: "openai", Input: 1, Output: 10},
+		"openrouter/gpt-test": {Family: "openai", Input: 5, Output: 50},
+	}, "openai/gpt-test")
+	b, err := New(primary, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 100; i++ {
+		r := b.Entry("companyhub/gpt-test")
+		if r.Source != "estimate from openai/gpt-test" || r.Input != 1 || r.Output != 10 {
+			t.Fatalf("iteration %d selected unstable fallback: %+v", i, r)
+		}
+	}
+}
+
+func TestEstimatedFallbackIsOfferedForConfirmation(t *testing.T) {
+	primary := writePrices(t, map[string]Rate{
+		"anthropic/claude-test": {Family: "claude", Input: 2, Output: 10},
+	}, "anthropic/claude-test")
+	b, err := New(primary, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := b.PendingSuggestions([]string{"companyhub/claude-test"})
+	if len(got) != 1 || got[0].IsUnknown || got[0].SuggestedRate.Output != 10 {
+		t.Fatalf("estimated private-provider rate should be confirmable: %+v", got)
+	}
+}
+
 func TestSaveOverrideAtomically(t *testing.T) {
 	primary := writePrices(t, sonnetRates(), "acme/sonnet")
 	overlayPath := filepath.Join(t.TempDir(), "prices.local.json")
@@ -295,4 +349,3 @@ func TestSaveOverrideAtomically(t *testing.T) {
 		t.Errorf("persisted override mismatch: %+v", doc.Models["custom/gpt"])
 	}
 }
-

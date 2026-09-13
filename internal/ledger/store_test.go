@@ -29,12 +29,15 @@ func TestPutIdempotentOnSameTokens(t *testing.T) {
 	if s.Put(r) {
 		t.Error("same token counts must be idempotent (not changed)")
 	}
-	// changing only the cost (same token counts) is idempotent — totals are
-	// recomputed by the caller, matching the original's change detection
+	// A provider may publish final cost after token totals stop changing.
+	// That authoritative update must reach the aggregate.
 	r2 := r
 	r2.Cost = 2.0
-	if s.Put(r2) {
-		t.Error("same token counts must be idempotent regardless of cost")
+	if !s.Put(r2) {
+		t.Error("changed cost should update even when tokens are unchanged")
+	}
+	if s.TotalCost != 2 {
+		t.Fatalf("updated cost not recomputed: %v", s.TotalCost)
 	}
 	// a real token update is reported as changed
 	r3 := r

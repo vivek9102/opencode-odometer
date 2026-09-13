@@ -63,6 +63,11 @@ meaningless. See [Private pricing](#private-pricing).
 - **Unknown-model prompt** — a model with no rate contributes $0 and is
   invisible to the budget, so the app surfaces it and offers a family-median
   estimate to correct.
+- **Explainable hybrid accounting** — an explicit local/free setting wins,
+  then a non-zero OpenCode event cost, then exact catalog pricing, then a
+  deterministic cross-provider estimate. Each ledger record keeps its source.
+- **No-charge pricing test** — simulate paid token counts without calling a
+  model, consuming provider credit, or changing the real ledger.
 - **CSV export** of every priced message.
 
 ---
@@ -74,7 +79,9 @@ meaningless. See [Private pricing](#private-pricing).
 1. Download `OpenCode_Odometer.exe` from
    [Releases](https://github.com/vivek9102/opencode-odometer/releases).
 2. Run it. On first launch it writes its price table and installs the plugin
-   into `~/.config/opencode/plugins/`.
+   into `~/.config/opencode/plugins/`. It also remembers that exact executable,
+   so it may remain in Downloads, Desktop, or any other folder. If you move it
+   later, run it once from the new location to update the pointer.
 3. **Restart OpenCode** so it loads the plugin.
 
 Windows SmartScreen will warn on an unsigned binary — *More info → Run anyway*.
@@ -174,8 +181,9 @@ median of that model's family.
 
 Startup reads the local table — **no network call**, so the UI never waits and
 an offline machine still works. A background refresh runs shortly after and
-every 6h thereafter, updating anything older than 24h. **UPDATE PRICES** forces
-it with visible success or failure.
+every 6h thereafter, updating anything older than 24h. **UPDATE CATALOG**
+forces it with visible success or failure. Catalog changes apply to future
+messages only; completed totals do not move when a price file is refreshed.
 
 Prices do move: a sample comparison found ~2% of entries changed within four
 days, which is why the embedded snapshot is a floor rather than the source of
@@ -213,8 +221,9 @@ limit can still rescue the session.
 | Cycle dock position | <kbd>F2</kbd> or `DOCK` |
 | TRIP / TOTAL | Click the odometer or `TRIP / TOTAL` |
 | Reset trip | `RESET TRIP` |
-| Reload prices from disk | `RELOAD PRICES` |
-| Download latest prices | `UPDATE PRICES` |
+| Apply local files to future usage | `APPLY LOCAL PRICES` |
+| Download catalog for future usage | `UPDATE CATALOG` |
+| Simulate paid-token pricing, no charge | `TEST PRICING` |
 | Cheaper alternatives | `CHEAPER MODELS` |
 | Abort the active session | `STOP SESSION` |
 | Export ledger | `EXPORT CSV` |
@@ -228,6 +237,7 @@ limit can still rescue the session.
 |---|---|
 | `OPENCODE_ODOMETER_DIR` | Override the data directory |
 | `OPENCODE_ODOMETER_POINTER` | Override the plugin discovery pointer |
+| `OPENCODE_ODOMETER_EXE` | Override the executable used for plugin auto-start |
 | `OPENCODE_PLUGIN_DIR` | Override where the plugin installs |
 | `OPENCODE_URL` | OpenCode server URL (default `http://127.0.0.1:4096`) |
 | `OPENCODE_ODOMETER=0` | Disable the plugin and auto-launch entirely |

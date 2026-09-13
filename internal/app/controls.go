@@ -43,18 +43,18 @@ func (a *App) ResetTrip() {
 	a.SaveState()
 }
 
-// ReloadPrices re-reads costs/overlay from disk so price edits take effect
-// without a restart. Existing messages are repriced in place.
+// ReloadPrices re-reads costs/overlay from disk so price edits apply to future
+// messages. Completed ledger records retain the cost and source captured when
+// they arrived; a maintenance action must never rewrite history silently.
 func (a *App) ReloadPrices() error {
 	if err := a.Prices.Reload(); err != nil {
 		return err
 	}
-	a.repriceLedger()
 	a.SaveState()
 	return nil
 }
 
-// RefreshPrices downloads the latest catalogue, then reprices history.
+// RefreshPrices downloads the latest catalogue for future messages.
 //
 // Reload only re-read local files despite the UI calling the action "reload
 // prices", so a user with a stale table had no way to update it from the app.
@@ -65,29 +65,38 @@ func (a *App) RefreshPrices() (int, error) {
 		a.logEvent("price refresh failed: %v", err)
 		return 0, err
 	}
-	a.repriceLedger()
-	a.absorbAndPublish()
 	a.SaveState()
 	a.logEvent("price refresh ok models=%d", n)
 	return n, nil
 }
 
-// repriceLedger re-costs every stored message against the current table, so a
-// price change corrects history rather than only future turns.
-func (a *App) repriceLedger() {
+// reclassifyFreeModels repairs only the safe direction of a classification
+// change: a persisted paid record whose current model entry is free. This is
+// intentionally narrower than repriceLedger so an app upgrade cannot silently
+// rewrite historical paid totals merely because the public catalogue changed.
+func (a *App) reclassifyFreeModels() {
 	a.Ledger.Lock()
+	changed := false
 	for mid, rec := range a.Ledger.Messages {
-		key := prices.NormalizeKey(rec.Provider, rec.Model)
-		e := a.Prices.Entry(key)
-		rec.Free = e.Free
-		rec.Cost = a.Prices.Cost(key, rec.TokensIn, rec.TokensOut, rec.CacheRead, rec.CacheWrite)
-		rec.Saved = 0
 		if rec.Free {
-			rec.Saved = a.Prices.ShadowCost(key, rec.TokensIn, rec.TokensOut, rec.CacheRead, rec.CacheWrite)
+			continue
 		}
+		key := prices.NormalizeKey(rec.Provider, rec.Model)
+		if !a.Prices.IsFree(key) {
+			continue
+		}
+		rec.Free = true
+		rec.Cost = 0
+		rec.Saved = a.Prices.ShadowCost(key, rec.TokensIn, rec.TokensOut, rec.CacheRead, rec.CacheWrite)
+		rec.Unknown = false
+		rec.Estimated = false
+		rec.CostSource = "free model marker"
 		a.Ledger.Messages[mid] = rec
+		changed = true
 	}
-	a.Ledger.RecomputeLocked()
+	if changed {
+		a.Ledger.RecomputeLocked()
+	}
 	a.Ledger.Unlock()
 }
 

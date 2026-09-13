@@ -21,7 +21,14 @@ type Record struct {
 	CacheWrite int64   `json:"cache_write"`
 	Cost       float64 `json:"cost"`
 	Saved      float64 `json:"saved"`
-	Timestamp  string  `json:"timestamp"`
+	// CostSource records whether this message used an OpenCode-reported cost,
+	// a local override, the catalog, or an estimate. Keeping it on each record
+	// makes historical totals explainable after the price table changes.
+	CostSource   string  `json:"cost_source,omitempty"`
+	ReportedCost float64 `json:"reported_cost,omitempty"`
+	Estimated    bool    `json:"estimated,omitempty"`
+	Unknown      bool    `json:"unknown,omitempty"`
+	Timestamp    string  `json:"timestamp"`
 	// Finish is the finish reason when known ("stop", "aborted", "error", ...).
 	Finish string `json:"finish,omitempty"`
 }
@@ -53,6 +60,8 @@ type ModelStat struct {
 	Saved      float64 `json:"saved"`
 	Free       bool    `json:"free"`
 	Unknown    bool    `json:"unknown"`
+	Estimated  bool    `json:"estimated,omitempty"`
+	Source     string  `json:"source,omitempty"`
 }
 
 // SessionStat aggregates spend for a single session.
@@ -92,8 +101,8 @@ func (s *Store) RLock() { s.mu.RLock() }
 func (s *Store) RUnlock() { s.mu.RUnlock() }
 
 // Put upserts a priced record by message id. It reports whether the record
-// was new or changed (i.e. its token counts differ from the prior value),
-// which the caller uses to decide whether to recompute.
+// was new or changed. Cost/provenance changes count too: some providers write
+// token totals before the final non-zero reported cost arrives.
 func (s *Store) Put(rec Record) bool {
 	if rec.MID == "" {
 		return false
@@ -106,7 +115,14 @@ func (s *Store) Put(rec Record) bool {
 		prev.TokensIn != rec.TokensIn ||
 		prev.TokensOut != rec.TokensOut ||
 		prev.CacheRead != rec.CacheRead ||
-		prev.CacheWrite != rec.CacheWrite
+		prev.CacheWrite != rec.CacheWrite ||
+		prev.Cost != rec.Cost ||
+		prev.Saved != rec.Saved ||
+		prev.Free != rec.Free ||
+		prev.Unknown != rec.Unknown ||
+		prev.Estimated != rec.Estimated ||
+		prev.CostSource != rec.CostSource ||
+		prev.ReportedCost != rec.ReportedCost
 	s.Messages[rec.MID] = rec
 	if changed {
 		s.recomputeLocked()
@@ -202,8 +218,17 @@ func (s *Store) recomputeLocked() {
 		savedTotal += rec.Saved
 		st := per[key]
 		if st == nil {
-			st = &ModelStat{Free: rec.Free}
+			st = &ModelStat{
+				Free: rec.Free, Unknown: rec.Unknown,
+				Estimated: rec.Estimated, Source: rec.CostSource,
+			}
 			per[key] = st
+		} else {
+			st.Unknown = st.Unknown || rec.Unknown
+			st.Estimated = st.Estimated || rec.Estimated
+			if st.Source != rec.CostSource {
+				st.Source = "mixed"
+			}
 		}
 		st.Msgs++
 		st.TokensIn += rec.TokensIn
@@ -429,4 +454,3 @@ func (s *Store) TotalCostStr() string {
 
 // HumanTokens compact-renders a token count.
 func HumanTokens(n int64) string { return Human(n) }
-

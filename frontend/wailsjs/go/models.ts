@@ -1,5 +1,5 @@
 export namespace app {
-	
+
 	export class Alternative {
 	    key: string;
 	    name: string;
@@ -8,7 +8,7 @@ export namespace app {
 	    output: number;
 	    free: boolean;
 	    ratio: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Alternative(source);
 	    }
@@ -22,6 +22,38 @@ export namespace app {
 	        this.output = source["output"];
 	        this.free = source["free"];
 	        this.ratio = source["ratio"];
+	    }
+	}
+	export class PricePreview {
+	    key: string;
+	    cost: number;
+	    source: string;
+	    estimated: boolean;
+	    free: boolean;
+	    unknown: boolean;
+	    reported_cost: number;
+	    input_rate: number;
+	    output_rate: number;
+	    cache_read_rate: number;
+	    cache_write_rate: number;
+
+	    static createFrom(source: any = {}) {
+	        return new PricePreview(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.cost = source["cost"];
+	        this.source = source["source"];
+	        this.estimated = source["estimated"];
+	        this.free = source["free"];
+	        this.unknown = source["unknown"];
+	        this.reported_cost = source["reported_cost"];
+	        this.input_rate = source["input_rate"];
+	        this.output_rate = source["output_rate"];
+	        this.cache_read_rate = source["cache_read_rate"];
+	        this.cache_write_rate = source["cache_write_rate"];
 	    }
 	}
 
@@ -328,4 +360,3 @@ export namespace wservice {
 	}
 
 }
-

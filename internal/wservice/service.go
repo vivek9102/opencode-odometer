@@ -235,12 +235,18 @@ func (s *Service) snapshot() *Snapshot {
 			unpricedModels++
 			unpricedTokens += m.TokensIn + m.TokensOut + m.CacheRead + m.CacheWrite
 		}
-		if !m.Free && !m.Unknown {
-			if e := a.Prices.Entry(it.Key); e.Source != "" {
+		// New records carry their pricing provenance. For ledgers written by an
+		// older version, fall back to the current table so the row is still useful.
+		row.Estimated = m.Estimated
+		row.Source = m.Source
+		if row.Source == "" && !m.Free && !m.Unknown {
+			if e := a.Prices.Entry(it.Key); strings.HasPrefix(e.Source, "estimate from ") {
 				row.Estimated = true
 				row.Source = e.Source
-				estimated++
 			}
+		}
+		if row.Estimated {
+			estimated++
 		}
 		rows = append(rows, row)
 	}
@@ -285,22 +291,22 @@ func (s *Service) snapshot() *Snapshot {
 	return &Snapshot{
 		View: view, Cost: viewCost, Saved: viewSaved,
 		TripCost: tripCost, TotalCost: totalCost,
-		Rate: a.BurnRate(),
+		Rate:  a.BurnRate(),
 		Model: modelName(a.Ledger.ActiveModel()), Tokens: a.Ledger.TotalTokens(),
 		Seeded: a.Seeded(), Active: a.LastActivity().Add(6 * time.Second).After(time.Now()),
 		BudgetEnabled: a.Budget.Enabled(), Limit: limit,
-		Exceeded:    a.Budget.Enabled() && sess.State == "over",
-		Mode:        string(a.Budget.Mode()), HardStopAt: a.Budget.HardStopAt(),
-		Fraction:    frac, BudgetLabel: label,
+		Exceeded: a.Budget.Enabled() && sess.State == "over",
+		Mode:     string(a.Budget.Mode()), HardStopAt: a.Budget.HardStopAt(),
+		Fraction: frac, BudgetLabel: label,
 		BudgetState: sess.State, SessionCost: sess.Cost, SessionID: sess.SessionID,
 		GraceRemaining: sess.GraceRemaining, PastHardStop: sess.PastHardStop,
-		Enforced:       a.Budget.Blocks(),
-		SessionCount:   len(allSessions), OtherCost: otherCost, WarnAt: warnAt,
+		Enforced:     a.Budget.Blocks(),
+		SessionCount: len(allSessions), OtherCost: otherCost, WarnAt: warnAt,
 		UnpricedModels: unpricedModels, UnpricedTokens: unpricedTokens,
-		Connected:      connected, ServerURL: serverURL, Via: via,
-		Link:           link, IdleFor: idleFor,
+		Connected: connected, ServerURL: serverURL, Via: via,
+		Link: link, IdleFor: idleFor,
 		EstimatedModels: estimated,
-		Dock: a.Dock(), Docked: a.DockMode(), Compact: s.appCompact, Rows: rows,
+		Dock:            a.Dock(), Docked: a.DockMode(), Compact: s.appCompact, Rows: rows,
 	}
 }
 
@@ -372,7 +378,7 @@ func (s *Service) ResetTrip() {
 	}
 }
 
-// RefreshPrices downloads the latest catalogue from models.dev and reprices.
+// RefreshPrices downloads the latest catalogue for future messages.
 // Returns a short status string for the UI, since a silent refresh gives the
 // user no way to tell a successful update from a failed one.
 func (s *Service) RefreshPrices() string {
@@ -384,7 +390,7 @@ func (s *Service) RefreshPrices() string {
 		return "error: " + err.Error()
 	}
 	s.refresh()
-	return fmt.Sprintf("Updated %d model prices", n)
+	return fmt.Sprintf("Updated %d model prices for future usage", n)
 }
 
 // PricesAgeHours reports how old the local price table is, so the UI can say
@@ -402,12 +408,21 @@ func (s *Service) PricesAgeHours() float64 {
 	return s.App.PricesAge().Hours()
 }
 
-// ReloadPrices reloads and reprices from disk.
+// ReloadPrices reloads local files for future messages.
 func (s *Service) ReloadPrices() error {
 	if s.App != nil {
 		return s.App.ReloadPrices()
 	}
 	return nil
+}
+
+// PreviewPrice runs the real pricing hierarchy with synthetic token counts.
+// It never writes a ledger record and therefore consumes no provider tokens.
+func (s *Service) PreviewPrice(key string, in, out, cacheRead, cacheWrite int64, reportedCost float64) app.PricePreview {
+	if s.App == nil || s.App.Prices == nil {
+		return app.PricePreview{Key: key, Unknown: true, Source: "app not initialized"}
+	}
+	return s.App.PreviewPrice(key, in, out, cacheRead, cacheWrite, reportedCost)
 }
 
 // ToggleViewMode flips TRIP/TOTAL.

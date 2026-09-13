@@ -56,6 +56,18 @@ func appDir() string {
 	return wd
 }
 
+func executablePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	abs, err := filepath.Abs(exe)
+	if err != nil {
+		return exe
+	}
+	return abs
+}
+
 func main() {
 	dir := dataDir()
 	logPath := filepath.Join(dir, "opencode_odometer_events.log")
@@ -83,7 +95,9 @@ func main() {
 	ad := appDir()
 	logMsg("odometer starting appDir=%s dataDir=%s", ad, dir)
 
-	_ = app.WritePointer(dir, filepath.Join(dir, "budget.json"), filepath.Join(dir, "grace_claims.json"), ad)
+	if err := app.WritePointer(dir, filepath.Join(dir, "budget.json"), filepath.Join(dir, "grace_claims.json"), ad, executablePath()); err != nil {
+		logMsg("pointer write failed: %v", err)
+	}
 
 	svc := wservice.New()
 

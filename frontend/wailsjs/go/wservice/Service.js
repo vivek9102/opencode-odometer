@@ -58,6 +58,10 @@ export function PendingPriceSuggestions() {
   return window['go']['wservice']['Service']['PendingPriceSuggestions']();
 }
 
+export function PreviewPrice(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['wservice']['Service']['PreviewPrice'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function PricesAgeHours() {
   return window['go']['wservice']['Service']['PricesAgeHours']();
 }

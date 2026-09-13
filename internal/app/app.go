@@ -41,16 +41,16 @@ type State struct {
 	// pricing re-flags an unknown model on every message, so a non-persistent
 	// dismissal would reappear on the next turn.
 	IgnoredPrices map[string]bool `json:"ignored_prices,omitempty"`
-	Seeded          bool               `json:"seeded"`
+	Seeded        bool            `json:"seeded"`
 	// SpoolOffset is how far the plugin event spool has been consumed, so a
 	// restart resumes instead of replaying the whole file.
-	SpoolOffset int64 `json:"spool_offset,omitempty"`
-	View            string             `json:"view"`
-	Compact         bool               `json:"compact"`
-	Dock            string             `json:"dock"`
-	Docked          bool               `json:"docked"`
-	Pos             []int              `json:"pos,omitempty"`
-	LastUpdated     int64              `json:"last_updated"`
+	SpoolOffset int64  `json:"spool_offset,omitempty"`
+	View        string `json:"view"`
+	Compact     bool   `json:"compact"`
+	Dock        string `json:"dock"`
+	Docked      bool   `json:"docked"`
+	Pos         []int  `json:"pos,omitempty"`
+	LastUpdated int64  `json:"last_updated"`
 }
 
 // Config carries file paths into the app.
@@ -163,11 +163,11 @@ func New(cfg Config) (*App, error) {
 	}
 	a.graceUsed = a.state.GraceUsed
 	a.loadState()
-
-	if cfg.StateFile != "" {
-		d := filepath.Dir(cfg.StateFile)
-		_ = WritePointer(d, cfg.BudgetFile, cfg.GraceFile, ".")
-	}
+	// Repair records that an older classifier charged even though their model
+	// key is now recognized as free. Do not broadly reprice paid history here:
+	// catalog changes remain an explicit Reload/Refresh Prices operation.
+	a.reclassifyFreeModels()
+	a.healTripBaseline()
 
 	// Enforcement always starts OFF.
 	//
@@ -532,9 +532,9 @@ func (a *App) ApplyMessage(m opencode.Message) bool {
 		mod = parts[1]
 	}
 
-	e := a.Prices.Entry(key)
-	free := e.Free
-	cost := a.Prices.Cost(key, m.Tokens.Input, m.Tokens.Output, m.Tokens.Cache.Read, m.Tokens.Cache.Write)
+	quote := a.PreviewPrice(key, m.Tokens.Input, m.Tokens.Output, m.Tokens.Cache.Read, m.Tokens.Cache.Write, m.Cost)
+	free := quote.Free
+	cost := quote.Cost
 	saved := 0.0
 	if free {
 		saved = a.Prices.ShadowCost(key, m.Tokens.Input, m.Tokens.Output, m.Tokens.Cache.Read, m.Tokens.Cache.Write)
@@ -562,20 +562,24 @@ func (a *App) ApplyMessage(m opencode.Message) bool {
 	}
 
 	rec := ledger.Record{
-		MID:        m.ID,
-		SessionID:  m.SessionID,
-		Provider:   prov,
-		Model:      mod,
-		Free:       free,
-		TokensIn:   m.Tokens.Input,
-		TokensOut:  m.Tokens.Output,
-		Reasoning:  m.Tokens.Reasoning,
-		CacheRead:  m.Tokens.Cache.Read,
-		CacheWrite: m.Tokens.Cache.Write,
-		Cost:       cost,
-		Saved:      saved,
-		Timestamp:  ts,
-		Finish:     m.Finish,
+		MID:          m.ID,
+		SessionID:    m.SessionID,
+		Provider:     prov,
+		Model:        mod,
+		Free:         free,
+		TokensIn:     m.Tokens.Input,
+		TokensOut:    m.Tokens.Output,
+		Reasoning:    m.Tokens.Reasoning,
+		CacheRead:    m.Tokens.Cache.Read,
+		CacheWrite:   m.Tokens.Cache.Write,
+		Cost:         cost,
+		Saved:        saved,
+		Unknown:      quote.Unknown,
+		Estimated:    quote.Estimated,
+		CostSource:   quote.Source,
+		ReportedCost: quote.ReportedCost,
+		Timestamp:    ts,
+		Finish:       m.Finish,
 	}
 
 	a.mu.Lock()
@@ -587,11 +591,10 @@ func (a *App) ApplyMessage(m opencode.Message) bool {
 
 	changed := a.Ledger.Put(rec)
 	if changed {
-		// Only log a message whose token counts actually moved. Polling
-		// re-reads every message in a session each tick, so logging on every
-		// pass wrote the same line every second and buried real activity.
-		a.logEvent("price msg=%s key=%q unknown=%v free=%v in=%d out=%d cache=%d cost=%.6f saved=%.6f",
-			m.ID, key, e.Unknown, free,
+		// Log only a materially changed record. Polling re-reads every message
+		// each tick, so logging identical records would bury real activity.
+		a.logEvent("price msg=%s key=%q source=%q unknown=%v free=%v in=%d out=%d cache=%d cost=%.6f saved=%.6f",
+			m.ID, key, quote.Source, quote.Unknown, free,
 			m.Tokens.Input, m.Tokens.Output,
 			m.Tokens.Cache.Read+m.Tokens.Cache.Write, cost, saved)
 
@@ -616,8 +619,8 @@ func (a *App) PendingPriceSuggestions() []prices.PriceSuggestion {
 	return a.Prices.PendingSuggestions(seen)
 }
 
-// IgnorePrice records that the user does not want to price a model. Its spend
-// keeps counting as $0; this only stops the prompt.
+// IgnorePrice stops asking about a model. An unknown stays at $0; a borrowed
+// cross-provider estimate continues to be shown as estimated.
 func (a *App) IgnorePrice(key string) {
 	a.mu.Lock()
 	if a.state.IgnoredPrices == nil {
@@ -629,7 +632,9 @@ func (a *App) IgnorePrice(key string) {
 	a.SaveState()
 }
 
-// SaveOverride persists an override rate to prices.local.json and updates the Book.
+// SaveOverride persists an explicit user correction. Unlike catalogue reloads,
+// this intentionally corrects prior records for this one model: the user has
+// reviewed the rate and chosen it as authoritative.
 func (a *App) SaveOverride(key string, rate prices.Rate) error {
 	overlay := a.cfg.OverlayFile
 	if overlay == "" {
@@ -647,8 +652,12 @@ func (a *App) SaveOverride(key string, rate prices.Rate) error {
 			rec.Free = e.Free
 			rec.Cost = a.Prices.Cost(recKey, rec.TokensIn, rec.TokensOut, rec.CacheRead, rec.CacheWrite)
 			rec.Saved = 0
+			rec.Unknown = false
+			rec.Estimated = false
+			rec.CostSource = "local override"
 			if e.Free {
 				rec.Saved = a.Prices.ShadowCost(recKey, rec.TokensIn, rec.TokensOut, rec.CacheRead, rec.CacheWrite)
+				rec.CostSource = "local override (free)"
 			}
 			a.Ledger.Messages[mid] = rec
 		}

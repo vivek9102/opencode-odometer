@@ -259,9 +259,10 @@ func TestSeedHistorySetsTripBaseline(t *testing.T) {
 	if !a.state.Seeded {
 		t.Error("seeded not set")
 	}
-	// the message is re-priced from tokens by ApplyMessage: 8.55
-	if a.Ledger.TotalCost != 8.55 {
-		t.Errorf("total cost = %v, want 8.55", a.Ledger.TotalCost)
+	// A non-zero OpenCode event cost is authoritative; catalog calculation is
+	// only the fallback when the provider reports no money value.
+	if a.Ledger.TotalCost != 5.0 {
+		t.Errorf("total cost = %v, want reported cost 5.0", a.Ledger.TotalCost)
 	}
 	if a.Ledger.TripCost != 0 {
 		t.Errorf("trip cost after seed = %v, want 0", a.Ledger.TripCost)

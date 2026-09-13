@@ -1,8 +1,13 @@
 # Pricing Guide
 
-Everything the Odometer knows about cost comes from **`prices.json`**. The app
-never calls a pricing API at runtime and never trusts a provider's own cost
-field — it prices every message itself, from a table you control.
+The Odometer uses a hybrid source hierarchy. Token counts always come from
+OpenCode. For money it uses, in order: an explicit free/local override, a
+non-zero cost reported by OpenCode, an exact `prices.json` entry, a
+deterministic cross-provider estimate, or unpriced `$0` with a prompt.
+
+Each message stores the source used. Refreshing the catalog never rewrites
+completed history; only saving an explicit model override performs a visible,
+one-model correction.
 
 All figures are **USD per 1,000,000 tokens**.
 
@@ -24,7 +29,7 @@ All figures are **USD per 1,000,000 tokens**.
 
 ## Why local pricing
 
-Three reasons the price table is local and authoritative:
+Three reasons a local fallback remains necessary:
 
 1. **Some providers report no cost at all.** Internal company gateways,
    resellers and self-hosted proxies routinely return `cost: 0` on every
@@ -106,8 +111,14 @@ wrote prices.json
   reference: anthropic/claude-sonnet-4-5
 ```
 
-Then click **RELOAD PRICES** in the app — all history is re-priced
-retroactively, so corrections apply to past messages too.
+Then click **APPLY LOCAL PRICES** in the app. The new rates apply to future
+messages; completed ledger records remain stable. When the app asks you to
+confirm a specific unknown/private-provider model, saving that explicit local
+override corrects past usage for that model once.
+
+Use **TEST PRICING** to enter synthetic input/output/cache token counts and see
+the effective cost and source. It makes no model request, spends no provider
+credit, and does not add anything to the real ledger.
 
 ### Offline / air-gapped
 
@@ -289,8 +300,8 @@ error usually means a missing cache rate.
 ## Troubleshooting
 
 **A model shows amber with `?`**
-Its key is not in the table. Click **RELOAD PRICES** — unpriced ids are listed
-in the dialog. Add them to your overlay.
+Its key is not in the table. Click the amber **PRICE TO CONFIRM** control and
+accept/edit the suggested rates, mark the exact model free, or ignore it.
 
 **Costs look ~8x too low**
 `cache_read` / `cache_write` are probably `0`. Cache dominates real traffic.

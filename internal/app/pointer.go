@@ -27,27 +27,29 @@ func PointerFilePath() string {
 
 // PointerPayload is the structure written to ~/.opencode-odometer.json.
 type PointerPayload struct {
-	Comment string `json:"_comment"`
-	DataDir string `json:"data_dir"`
-	Budget  string `json:"budget"`
-	Grace   string `json:"grace"`
-	AppDir  string `json:"app_dir"`
-	PID     int    `json:"pid"`
-	Updated int64  `json:"updated"`
+	Comment    string `json:"_comment"`
+	DataDir    string `json:"data_dir"`
+	Budget     string `json:"budget"`
+	Grace      string `json:"grace"`
+	AppDir     string `json:"app_dir"`
+	Executable string `json:"executable,omitempty"`
+	PID        int    `json:"pid"`
+	Updated    int64  `json:"updated"`
 }
 
 // WritePointer writes ~/.opencode-odometer.json so the OpenCode plugin
 // can discover where budget.json and grace_claims.json live.
-func WritePointer(dataDir, budgetFile, graceFile, appDir string) error {
+func WritePointer(dataDir, budgetFile, graceFile, appDir, executable string) error {
 	p := PointerFilePath()
 	payload := PointerPayload{
-		Comment: "Written by OpenCode Odometer so the plugin can locate budget.json. Safe to delete.",
-		DataDir: dataDir,
-		Budget:  budgetFile,
-		Grace:   graceFile,
-		AppDir:  appDir,
-		PID:     os.Getpid(),
-		Updated: time.Now().Unix(),
+		Comment:    "Written by OpenCode Odometer so the plugin can locate budget.json. Safe to delete.",
+		DataDir:    dataDir,
+		Budget:     budgetFile,
+		Grace:      graceFile,
+		AppDir:     appDir,
+		Executable: executable,
+		PID:        os.Getpid(),
+		Updated:    time.Now().Unix(),
 	}
 	raw, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

@@ -82,8 +82,9 @@
       <div class="controls">
         <button id="bd-toggle" class="ctl">TRIP / TOTAL</button>
         <button id="bd-reset" class="ctl">RESET TRIP</button>
-        <button id="bd-reload" class="ctl" title="Re-read prices.json and prices.local.json from disk">RELOAD PRICES</button>
-        <button id="bd-update-prices" class="ctl" title="Download the latest rates from models.dev">UPDATE PRICES</button>
+        <button id="bd-reload" class="ctl" title="Apply local price-file changes to future usage; history stays unchanged">APPLY LOCAL PRICES</button>
+        <button id="bd-update-prices" class="ctl" title="Download the latest catalog for future usage; history stays unchanged">UPDATE CATALOG</button>
+        <button id="bd-test-pricing" class="ctl" title="Preview paid-model cost with synthetic tokens; no API call or ledger change">TEST PRICING</button>
         <button id="bd-dock" class="ctl" title="Cycle dock position (F2)">DOCK</button>
         <button id="bd-switch" class="ctl switch" title="Show cheaper models">CHEAPER MODELS</button>
         <button id="bd-stop" class="ctl stop" title="Abort the active session in OpenCode">STOP SESSION</button>
@@ -147,15 +148,42 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <div class="modal-header">
-        <h3>SET MISSING PRICES</h3>
+        <h3>CONFIRM MODEL PRICES</h3>
         <button id="price-close" class="modal-close-btn">&times;</button>
       </div>
       <p class="modal-sub">
-        These models are not in the price table, so their spend counts as $0 and
-        is invisible to the session limit. Rates are USD per 1M tokens; the
-        values below are estimates you can correct.
+        Unknown models count as $0; private providers may use a clearly marked
+        estimate from the same public model. Rates are USD per 1M tokens. Save
+        your rates, mark a model free, or ignore the suggestion. Saving is an
+        explicit correction and recalculates past usage for that model once.
       </p>
       <div id="price-list" class="model-list"></div>
+    </div>
+  </div>
+
+  <!-- ===== NO-CHARGE PRICING TEST ===== -->
+  <div id="pricing-test-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>TEST PRICING — NO TOKENS USED</h3>
+        <button id="pricing-test-close" class="modal-close-btn">&times;</button>
+      </div>
+      <p class="modal-sub">
+        This runs the real pricing hierarchy with synthetic token counts. It
+        makes no provider request, consumes no paid tokens, and never changes
+        the odometer ledger.
+      </p>
+      <div class="sim-grid">
+        <label>provider/model <input id="pt-model" value="openai/gpt-5.1" /></label>
+        <label>input tokens <input id="pt-in" type="number" min="0" value="1000000" /></label>
+        <label>output tokens <input id="pt-out" type="number" min="0" value="100000" /></label>
+        <label>cache read <input id="pt-cr" type="number" min="0" value="0" /></label>
+        <label>cache write <input id="pt-cw" type="number" min="0" value="0" /></label>
+        <label>event cost (optional) <input id="pt-reported" type="number" min="0" step="0.000001" value="0" /></label>
+      </div>
+      <button id="pricing-test-run" class="ctl switch">CALCULATE</button>
+      <div id="pricing-test-result" class="sim-result">Enter a model and calculate.</div>
     </div>
   </div>
 

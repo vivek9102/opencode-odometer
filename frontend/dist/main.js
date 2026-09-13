@@ -291,8 +291,8 @@ function render(snap) {
       td.textContent = c;
       tr.appendChild(td);
     });
-    tr.title = r.estimated
-      ? `${r.key} — estimated rate (${r.source})`
+    tr.title = r.source
+      ? `${r.key} — cost source: ${r.source}`
       : r.key;
     tb.appendChild(tr);
   }
@@ -381,14 +381,14 @@ $("bd-reset").addEventListener("click", () => {
 $("bd-reload").addEventListener("click", () => {
   const p = Svc().ReloadPrices();
   if (p && p.then) {
-    p.then(() => toast("Prices reloaded", "ok"))
+    p.then(() => toast("Local prices applied to future usage", "ok"))
      .catch((err) => toast("Reload failed: " + err, "over"));
   }
 });
-// Download the latest catalogue. Distinct from RELOAD, which only re-reads the
-// files already on disk.
+// Download the latest catalogue. Neither catalog action rewrites completed
+// messages; only explicit user overrides can correct history.
 $("bd-update-prices").addEventListener("click", () => {
-  toast("Fetching latest prices\u2026", "ok");
+  toast("Fetching latest price catalog\u2026", "ok");
   Svc().RefreshPrices()
     .then((msg) => {
       toast(msg, String(msg).startsWith("error:") ? "over" : "ok");
@@ -421,7 +421,7 @@ $("bd-export").addEventListener("click", () => {
     String(r).startsWith("error:") ? "over" : "ok"));
 });
 
-// ---- missing prices ----
+// ---- prices needing confirmation ----
 //
 // An unpriced model is not just a cosmetic gap: it contributes $0 to the
 // session total, so its spend never reaches the budget and cannot trigger a
@@ -434,7 +434,7 @@ function refreshUnpriced() {
     const n = (list || []).length;
     const btn = $("bd-unpriced");
     btn.classList.toggle("hidden", n === 0);
-    if (n > 0) btn.textContent = n === 1 ? "1 MODEL UNPRICED" : n + " MODELS UNPRICED";
+    if (n > 0) btn.textContent = n === 1 ? "1 PRICE TO CONFIRM" : n + " PRICES TO CONFIRM";
   }).catch(() => { /* backend not ready */ });
 }
 
@@ -498,7 +498,8 @@ function openPriceModal() {
 
       const save = document.createElement("button");
       save.className = "model-pick-btn";
-      save.textContent = "SAVE";
+      save.textContent = sug.is_unknown ? "SAVE RATES" : "ACCEPT / SAVE";
+      save.title = "Save an authoritative local rate and correct past usage for this model.";
       save.addEventListener("click", () => {
         const rate = { name: bareModel(sug.key), family: r.family || "" };
         let bad = false;
@@ -517,11 +518,32 @@ function openPriceModal() {
           .catch((err) => toast("Save failed: " + err, "over"));
       });
 
+      const free = document.createElement("button");
+      free.className = "model-pick-btn";
+      free.style.background = "#166534";
+      free.textContent = "MARK FREE";
+      free.title = "Save this exact provider/model as free and correct its past usage to $0.";
+      free.addEventListener("click", () => {
+        const rate = {
+          name: bareModel(sug.key), family: r.family || "", free: true,
+          input: 0, output: 0, cache_read: 0, cache_write: 0,
+        };
+        Svc().ApplyPriceOverride(sug.key, rate)
+          .then(() => {
+            toast("Marked " + bareModel(sug.key) + " free", "ok");
+            refreshUnpriced();
+            openPriceModal();
+          })
+          .catch((err) => toast("Save failed: " + err, "over"));
+      });
+
       const skip = document.createElement("button");
       skip.className = "model-pick-btn";
       skip.style.background = "#3f3f46";
       skip.textContent = "IGNORE";
-      skip.title = "Stop asking about this model. Its spend stays uncounted.";
+      skip.title = sug.is_unknown
+        ? "Stop asking. This unknown model remains uncounted."
+        : "Stop asking. The displayed cross-provider estimate remains in use.";
       skip.addEventListener("click", () => {
         Svc().SkipPrice(sug.key);
         toast("Ignoring " + bareModel(sug.key), "ok");
@@ -530,7 +552,9 @@ function openPriceModal() {
       });
 
       const btns = document.createElement("div");
+      btns.className = "price-actions";
       btns.appendChild(save);
+      btns.appendChild(free);
       btns.appendChild(skip);
 
       card.appendChild(info);
@@ -543,6 +567,32 @@ function openPriceModal() {
 
 function closePriceModal() { priceModal.classList.add("hidden"); }
 
+// ---- no-charge pricing simulator ----
+const pricingTestModal = $("pricing-test-modal");
+
+function openPricingTest() {
+  const rows = snapshot && snapshot.rows ? snapshot.rows : [];
+  if (rows.length && rows[0].key) $("pt-model").value = rows[0].key;
+  $("pricing-test-result").textContent = "No API call will be made and the real total will not change.";
+  pricingTestModal.classList.remove("hidden");
+}
+
+function closePricingTest() { pricingTestModal.classList.add("hidden"); }
+
+$("pricing-test-run").addEventListener("click", () => {
+  const key = $("pt-model").value.trim();
+  const value = (id) => Math.max(0, Number($(id).value) || 0);
+  if (!key) { toast("Enter provider/model", "over"); return; }
+  Svc().PreviewPrice(key, value("pt-in"), value("pt-out"), value("pt-cr"), value("pt-cw"), value("pt-reported"))
+    .then((q) => {
+      const flag = q.free ? "FREE" : q.unknown ? "UNKNOWN — $0 UNTIL CONFIRMED" : q.estimated ? "ESTIMATE" : "AUTHORITATIVE";
+      const rates = `in $${Number(q.input_rate || 0).toFixed(4)} / out $${Number(q.output_rate || 0).toFixed(4)} per 1M`;
+      $("pricing-test-result").textContent =
+        `$${Number(q.cost || 0).toFixed(6)}  ·  ${flag}\n${q.source || "unknown source"}  ·  ${rates}`;
+    })
+    .catch((err) => toast("Pricing test failed: " + err, "over"));
+});
+
 // Show how old the price table is. Rates drift, and a table with no stated age
 // implies it is current when it may be months old.
 function refreshPricesAge() {
@@ -552,16 +602,16 @@ function refreshPricesAge() {
     // -1 means the built-in snapshot: it has no meaningful age, and showing
     // one made a fresh install claim its prices were a year old.
     if (h < 0) {
-      btn.textContent = "UPDATE PRICES (built-in)";
-      btn.title = "Using prices bundled with the app. Updating from models.dev\u2026";
+      btn.textContent = "UPDATE CATALOG (built-in)";
+      btn.title = "Using bundled prices. Download the latest catalog for future usage.";
       btn.classList.remove("unpriced");
       return;
     }
-    if (!(h > 0)) { btn.textContent = "UPDATE PRICES"; return; }
+    if (!(h > 0)) { btn.textContent = "UPDATE CATALOG"; return; }
     const days = Math.floor(h / 24);
     const label = days >= 1 ? days + "d" : Math.max(1, Math.round(h)) + "h";
-    btn.textContent = "UPDATE PRICES (" + label + " old)";
-    btn.title = "Download the latest rates from models.dev";
+    btn.textContent = "UPDATE CATALOG (" + label + " old)";
+    btn.title = "Download latest rates for future usage; history remains unchanged";
     // A table older than a week is worth drawing attention to.
     btn.classList.toggle("unpriced", h > 24 * 7);
   }).catch(() => { /* backend not ready */ });
@@ -570,6 +620,9 @@ function refreshPricesAge() {
 $("bd-unpriced").addEventListener("click", openPriceModal);
 $("price-close").addEventListener("click", closePriceModal);
 priceModal.querySelector(".modal-backdrop").addEventListener("click", closePriceModal);
+$("bd-test-pricing").addEventListener("click", openPricingTest);
+$("pricing-test-close").addEventListener("click", closePricingTest);
+pricingTestModal.querySelector(".modal-backdrop").addEventListener("click", closePricingTest);
 
 // ---- cheaper models modal ----
 const modal = $("model-modal");
@@ -967,6 +1020,7 @@ window.addEventListener("keydown", (e) => {
     if (!menu.classList.contains("hidden")) closeMenu();
     else if (!advice.classList.contains("hidden")) closeAdvice();
     else if (!priceModal.classList.contains("hidden")) closePriceModal();
+    else if (!pricingTestModal.classList.contains("hidden")) closePricingTest();
     else if (!modal.classList.contains("hidden")) closeModelModal();
     else setView(false);
   } else if (e.key === "F2") {

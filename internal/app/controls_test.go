@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/vivek9102/opencode-odometer/internal/ledger"
 )
 
 func TestViewModeDefaultsToTrip(t *testing.T) {
@@ -66,7 +68,7 @@ func TestCycleDock(tt *testing.T) {
 	}
 }
 
-func TestReloadPricesReprices(tt *testing.T) {
+func TestReloadPricesKeepsHistoryAndPricesFutureMessages(tt *testing.T) {
 	a, _, _ := newTestApp(tt)
 	if !a.ApplyMessage(asst("m1", "s1", "acme", "sonnet", 0)) {
 		tt.Fatal("expected new message to change ledger")
@@ -90,8 +92,39 @@ func TestReloadPricesReprices(tt *testing.T) {
 	if err := a.ReloadPrices(); err != nil {
 		tt.Fatal(err)
 	}
-	after := a.Ledger.TotalCost
-	if after <= before {
-		tt.Fatalf("reload should reprice at new output rate: before %v, after %v", before, after)
+	afterReload := a.Ledger.TotalCost
+	if afterReload != before {
+		tt.Fatalf("reload rewrote history: before %v, after %v", before, afterReload)
+	}
+
+	if !a.ApplyMessage(asst("m2", "s1", "acme", "sonnet", 0)) {
+		tt.Fatal("expected future message to change ledger")
+	}
+	newMessageCost := a.Ledger.Messages["m2"].Cost
+	if newMessageCost <= before {
+		tt.Fatalf("future message did not use new rates: old message %v, new message %v", before, newMessageCost)
+	}
+}
+
+func TestReclassifyFreeModelsDoesNotRepricePaidHistory(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	a.Ledger.Put(ledger.Record{
+		MID: "free", Provider: "companyhub", Model: "deepseek-v4-flash-sovereign",
+		TokensIn: 1_000_000, TokensOut: 1_000_000, Cost: 99,
+	})
+	a.Ledger.Put(ledger.Record{
+		MID: "paid", Provider: "acme", Model: "sonnet",
+		TokensIn: 1_000_000, TokensOut: 1_000_000, Cost: 7,
+	})
+
+	a.reclassifyFreeModels()
+
+	free := a.Ledger.Messages["free"]
+	if !free.Free || free.Cost != 0 || free.Saved <= 0 {
+		t.Errorf("free record was not repaired: %+v", free)
+	}
+	paid := a.Ledger.Messages["paid"]
+	if paid.Free || paid.Cost != 7 {
+		t.Errorf("paid history was unexpectedly repriced: %+v", paid)
 	}
 }

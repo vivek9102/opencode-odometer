@@ -26,7 +26,7 @@ import {
   statSync,
   rmSync,
 } from "node:fs"
-import { join } from "node:path"
+import { dirname, isAbsolute, join } from "node:path"
 import { homedir, tmpdir } from "node:os"
 
 // Where the odometer is installed. Override with OPENCODE_ODOMETER_HOME.
@@ -50,7 +50,7 @@ const CANDIDATE_EXES = [
   join(ODO_DIR, "OpenCode_Odometer"),
 ]
 
-const EXE = CANDIDATE_EXES.find((p) => existsSync(p)) || CANDIDATE_EXES[0]
+const EXECUTABLE_NAMES = ["OpenCode_Odometer.exe", "odometer.exe", "OpenCode_Odometer"]
 const PY = join(ODO_DIR, "opencode_monitor.py")
 
 // The odometer writes budget.json to its data dir (LOCALAPPDATA on Windows,
@@ -66,7 +66,8 @@ const DATA_DIR =
 // The odometer writes a pointer file to a fixed location on every start,
 // naming its real data dir. Reading it means a moved/overridden DATA_DIR can
 // never leave us reading a stale ledger from a path that no longer updates.
-const POINTER_FILE = join(homedir(), ".opencode-odometer.json")
+const POINTER_FILE =
+  process.env.OPENCODE_ODOMETER_POINTER || join(homedir(), ".opencode-odometer.json")
 function pointer() {
   try {
     if (!existsSync(POINTER_FILE)) return null
@@ -74,6 +75,29 @@ function pointer() {
   } catch {
     return null
   }
+}
+
+function isFile(path) {
+  try {
+    return typeof path === "string" && path.length > 0 && statSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+// Prefer the exact executable recorded by the last successfully started app.
+// app_dir keeps compatibility with older pointer files. The fixed install
+// locations remain fallbacks for first-run and source-build workflows.
+function resolveExe() {
+  const p = pointer()
+  const candidates = []
+  if (process.env.OPENCODE_ODOMETER_EXE) candidates.push(process.env.OPENCODE_ODOMETER_EXE)
+  if (p?.executable) candidates.push(p.executable)
+  if (p?.app_dir && isAbsolute(p.app_dir)) {
+    candidates.push(...EXECUTABLE_NAMES.map((name) => join(p.app_dir, name)))
+  }
+  candidates.push(...CANDIDATE_EXES)
+  return [...new Set(candidates)].find(isFile) || null
 }
 
 // The odometer runs as a separate process and cannot know which port this
@@ -344,11 +368,11 @@ function launch() {
   lastLaunchAt = Date.now()
 
   let cmd, args, cwd
-  const validExe = CANDIDATE_EXES.find((p) => existsSync(p))
+  const validExe = resolveExe()
   if (validExe) {
     cmd = validExe
     args = []
-    cwd = ODO_DIR
+    cwd = dirname(validExe)
   } else if (existsSync(PY)) {
     cmd = process.platform === "win32" ? "pythonw" : "python3"
     args = [PY]
