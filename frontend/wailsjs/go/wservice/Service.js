@@ -22,6 +22,10 @@ export function ApplyPriceOverride(arg1, arg2) {
   return window['go']['wservice']['Service']['ApplyPriceOverride'](arg1, arg2);
 }
 
+export function ClearPriceOverrides() {
+  return window['go']['wservice']['Service']['ClearPriceOverrides']();
+}
+
 export function AvailableModels() {
   return window['go']['wservice']['Service']['AvailableModels']();
 }

@@ -429,8 +429,8 @@ function refreshUnpriced() {
     const btn = $("bd-unpriced");
     btn.classList.toggle("hidden", prices.length === 0);
     btn.textContent = n > 0
-      ? (n === 1 ? "1 PRICE TO CONFIRM" : n + " PRICES TO CONFIRM")
-      : "MODEL PRICES";
+      ? (n === 1 ? "1 CUSTOM PRICE TO REVIEW" : n + " CUSTOM PRICES TO REVIEW")
+      : "CUSTOM PROVIDER PRICES";
   }).catch(() => { /* backend not ready */ });
 }
 
@@ -595,6 +595,24 @@ function openPriceModal() {
       card.appendChild(info);
       card.appendChild(btns);
       wrap.appendChild(card);
+    }
+
+    if ((list || []).some((s) => s.is_local)) {
+      const reset = document.createElement("button");
+      reset.className = "ctl reset-provider-prices";
+      reset.textContent = "RESET SAVED PRICES";
+      reset.title = "Remove every custom provider price. New messages return to public-provider estimates; history stays unchanged.";
+      reset.addEventListener("click", () => {
+        if (!confirm("Reset all saved custom provider prices?\n\nNew messages will use public-provider estimates. Recorded history will not change.")) return;
+        Svc().ClearPriceOverrides()
+          .then(() => {
+            toast("Saved provider prices reset", "ok");
+            refreshUnpriced();
+            openPriceModal();
+          })
+          .catch((err) => toast("Reset failed: " + err, "over"));
+      });
+      wrap.appendChild(reset);
     }
     priceModal.classList.remove("hidden");
   });

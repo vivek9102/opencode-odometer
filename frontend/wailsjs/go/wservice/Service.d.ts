@@ -15,6 +15,8 @@ export function AllowMoreSession(arg1:number,arg2:number):Promise<void>;
 
 export function ApplyPriceOverride(arg1:string,arg2:prices.Rate):Promise<void>;
 
+export function ClearPriceOverrides():Promise<void>;
+
 export function AvailableModels():Promise<Array<wservice.ModelOption>>;
 
 export function CycleDock():Promise<string>;

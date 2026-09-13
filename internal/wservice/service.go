@@ -499,6 +499,19 @@ func (s *Service) ApplyPriceOverride(key string, rate prices.Rate) error {
 	return err
 }
 
+// ClearPriceOverrides removes all saved provider-specific prices. It affects
+// future messages only; historical ledger records remain unchanged.
+func (s *Service) ClearPriceOverrides() error {
+	if s.App == nil {
+		return fmt.Errorf("app not initialized")
+	}
+	if err := s.App.ClearPriceOverrides(); err != nil {
+		return err
+	}
+	s.refresh()
+	return nil
+}
+
 // SkipPrice acknowledges an unknown price without persisting an override.
 func (s *Service) SkipPrice(key string) {
 	if s.App != nil && s.App.Prices != nil {

@@ -675,6 +675,20 @@ func (a *App) SaveOverride(key string, rate prices.Rate) error {
 	return nil
 }
 
+// ClearPriceOverrides restores catalogue and cross-provider pricing for future
+// messages. Historical records retain the price captured when they arrived.
+func (a *App) ClearPriceOverrides() error {
+	overlay := a.cfg.OverlayFile
+	if overlay == "" {
+		overlay = "prices.local.json"
+	}
+	if err := a.Prices.ClearOverrides(overlay); err != nil {
+		return err
+	}
+	a.SaveState()
+	return nil
+}
+
 // LastActivity records the most recent message time for the UI.
 func (a *App) LastActivity() time.Time {
 	a.mu.RLock()

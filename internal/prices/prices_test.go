@@ -356,3 +356,35 @@ func TestSaveOverrideAtomically(t *testing.T) {
 		t.Errorf("persisted override mismatch: %+v", doc.Models["custom/gpt"])
 	}
 }
+
+func TestClearOverridesRestoresCatalogAndEmptiesFile(t *testing.T) {
+	primary := writePrices(t, sonnetRates(), "acme/sonnet")
+	overlayPath := filepath.Join(t.TempDir(), "prices.local.json")
+	b, err := New(primary, overlayPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.SaveOverride(overlayPath, "acme/sonnet", Rate{Input: 99, Output: 999}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClearOverrides(overlayPath); err != nil {
+		t.Fatal(err)
+	}
+	if b.IsLocal("acme/sonnet") {
+		t.Fatal("price remained local after reset")
+	}
+	if got := b.Entry("acme/sonnet"); got.Input != inR || got.Output != outR {
+		t.Fatalf("catalog rate was not restored: %+v", got)
+	}
+	raw, err := os.ReadFile(overlayPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Models) != 0 {
+		t.Fatalf("override file not emptied: %+v", doc.Models)
+	}
+}

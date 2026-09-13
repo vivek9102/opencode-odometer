@@ -146,15 +146,16 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <div class="modal-header">
-        <h3>UNKNOWN PROVIDER PRICES</h3>
+        <h3>CUSTOM PROVIDER PRICES</h3>
         <button id="price-close" class="modal-close-btn">&times;</button>
       </div>
       <p class="modal-sub">
-        The best matching public provider price is used by default—for example,
+        For private gateways and providers without their own public rates, the
+        best matching original-provider price is used by default—for example,
         Anthropic's price for a CompanyHub Claude model. Rates are USD per 1M
-        tokens. You can update a saved price at any time. Changes apply only to
-        new messages; recorded history never changes. If no public match exists,
-        the model stays at $0 until you save a price.
+        tokens. Saved prices can be updated or reset at any time. Changes apply
+        only to new messages; recorded history never changes. If no public match
+        exists, the model stays at $0 until you save a price.
       </p>
       <div id="price-list" class="model-list"></div>
     </div>

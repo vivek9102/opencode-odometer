@@ -565,6 +565,44 @@ func (b *Book) SaveOverride(overlayPath, key string, rate Rate) error {
 	return nil
 }
 
+// ClearOverrides removes every user-authored price and immediately restores
+// the in-memory catalogue view. It intentionally does not touch any ledger;
+// callers decide whether history should be repaired as a separate operation.
+func (b *Book) ClearOverrides(overlayPath string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if overlayPath == "" {
+		overlayPath = b.overlay
+	}
+	if overlayPath == "" {
+		return fmt.Errorf("no overlay path configured")
+	}
+	doc := document{Models: map[string]Rate{}}
+	raw, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(overlayPath), 0o755); err != nil {
+		return err
+	}
+	tmp := overlayPath + ".tmp"
+	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, overlayPath); err != nil {
+		return err
+	}
+
+	b.localModels = map[string]Rate{}
+	b.Models = make(map[string]Rate, len(b.catalogModels))
+	for k, r := range b.catalogModels {
+		b.Models[k] = r
+	}
+	b.fixupReference()
+	return nil
+}
+
 // RLockModels takes a read lock over the merged model table so callers can
 // snapshot it without racing a Reload.
 func (b *Book) RLockModels() { b.mu.RLock() }

@@ -161,6 +161,28 @@ func TestLocalFreeOverrideDoesNotReclassifyHistory(t *testing.T) {
 	}
 }
 
+func TestClearPriceOverridesKeepsHistoryAndRestoresFutureDefault(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	a.cfg.OverlayFile = filepath.Join(t.TempDir(), "prices.local.json")
+	override := prices.Rate{Name: "Sonnet", Input: 30, Output: 150, CacheRead: 3, CacheWrite: 37.5}
+	if err := a.SaveOverride("companyhub/sonnet", override); err != nil {
+		t.Fatal(err)
+	}
+	a.ApplyMessage(asst("custom", "s1", "companyhub", "sonnet", 0))
+	customCost := a.Ledger.TotalCost
+
+	if err := a.ClearPriceOverrides(); err != nil {
+		t.Fatal(err)
+	}
+	if a.Ledger.TotalCost != customCost {
+		t.Fatalf("reset rewrote historical custom spend: before=%v after=%v", customCost, a.Ledger.TotalCost)
+	}
+	a.ApplyMessage(asst("default", "s1", "companyhub", "sonnet", 0))
+	if got := a.Ledger.Messages["default"].Cost; got >= customCost {
+		t.Fatalf("future message did not return to lower catalog estimate: default=%v custom=%v", got, customCost)
+	}
+}
+
 func TestReclassifyFreeModelsDoesNotRepricePaidHistory(t *testing.T) {
 	a, _, _ := newTestApp(t)
 	a.Ledger.Put(ledger.Record{

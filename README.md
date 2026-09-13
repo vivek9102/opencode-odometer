@@ -221,7 +221,7 @@ limit can still rescue the session.
 | TRIP / TOTAL | Click the odometer or `TRIP / TOTAL` |
 | Reset trip | `RESET TRIP` |
 | Download catalog for future usage | `UPDATE CATALOG` |
-| Review or update unknown-provider prices | `MODEL PRICES` / `PRICE TO CONFIRM` |
+| Review, update, or reset private-provider prices | `CUSTOM PROVIDER PRICES` |
 | Cheaper alternatives | `CHEAPER MODELS` |
 | Abort the active session | `STOP SESSION` |
 | Export ledger | `EXPORT CSV` |

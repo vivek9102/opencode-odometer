@@ -309,6 +309,8 @@ select {
   font: 10px var(--font-mono); cursor: pointer; }
 .cache-toggle input { vertical-align: middle; }
 .cache-note { margin-top: 3px; color: var(--dim); font: 9px var(--font-ui); }
+.reset-provider-prices { display: block; margin: 12px 0 0 auto; color: #fca5a5;
+  border-color: #7f1d1d; }
 .rate-in:focus { outline: none; border-color: #2563eb; }
 
 /* provider badge: quieter than the tier tag, since it identifies rather than ranks */
