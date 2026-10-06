@@ -24,6 +24,7 @@ func TestBreachDrivesAlertState(t *testing.T) {
 		t.Fatalf("app.New: %v", err)
 	}
 	a.SetSeeded(true)
+	inventory(t, a, []app.ConfiguredModel{{Key: "acme/expensive"}, {Key: "acme/cheap"}})
 	a.Budget.Cfg.SessionLimitUSD = 5
 	a.Budget.Cfg.Mode = "hard"
 	a.SetEnabled(true)
