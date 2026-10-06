@@ -230,8 +230,14 @@ func TestEndToEndWorkflow(t *testing.T) {
 	svc.Start()
 	defer svc.Stop()
 
-	// Give the client a moment to connect and seed history
-	time.Sleep(250 * time.Millisecond)
+	// Wait for actual readiness instead of assuming the CI runner seeds and
+	// connects within a fixed delay.
+	waitForWorkflow(t, "history seed and stream connection", func() bool {
+		mockServer.mu.Lock()
+		connected := len(mockServer.clients) > 0
+		mockServer.mu.Unlock()
+		return connected && application.Seeded()
+	})
 
 	// Verify SeedHistory ran
 	if !application.Seeded() {
@@ -265,6 +271,17 @@ func TestEndToEndWorkflow(t *testing.T) {
 	if !bDoc.Enabled || bDoc.SessionLimitUSD != 1.00 || bDoc.Mode != "soft" {
 		t.Errorf("unexpected budget doc: %+v", bDoc)
 	}
+	waitForBudget := func(state string) {
+		waitForWorkflow(t, "live budget state "+state, func() bool {
+			raw, err := os.ReadFile(budgetFile)
+			var doc plugin.BudgetFile
+			if err != nil || json.Unmarshal(raw, &doc) != nil {
+				return false
+			}
+			live := doc.Sessions["ses_live"]
+			return live.Cost > 0 && live.State == state
+		})
+	}
 
 	// 4. Stream a live paid SSE message
 	liveMsg := `data: {"type":"message.updated","properties":{"info":{
@@ -279,8 +296,8 @@ func TestEndToEndWorkflow(t *testing.T) {
 	}}}`
 	mockServer.emit(liveMsg)
 
-	// Allow message to be processed
-	time.Sleep(250 * time.Millisecond)
+	// Wait until ingestion and budget publication have both completed.
+	waitForBudget("ok")
 
 	snap = svc.Snapshot()
 	if snap.Cost < 0.65 {
@@ -305,7 +322,7 @@ func TestEndToEndWorkflow(t *testing.T) {
 		"finish":"stop"
 	}}}`
 	mockServer.emit(liveMsg2)
-	time.Sleep(250 * time.Millisecond)
+	waitForBudget("warn")
 
 	// Total in ses_live: ~0.6525 + 0.3 = ~0.9525 -> 95.25% of $1.00 -> state="warn"
 	bRaw, _ = os.ReadFile(budgetFile)
@@ -327,7 +344,7 @@ func TestEndToEndWorkflow(t *testing.T) {
 		"finish":"stop"
 	}}}`
 	mockServer.emit(liveMsg3)
-	time.Sleep(250 * time.Millisecond)
+	waitForBudget("over")
 
 	// Total in ses_live: ~1.2525 -> over $1.00 -> state="over", grace_remaining=1
 	bRaw, _ = os.ReadFile(budgetFile)
@@ -428,4 +445,16 @@ func TestEndToEndWorkflow(t *testing.T) {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func waitForWorkflow(t *testing.T, description string, ready func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if ready() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", description)
 }
