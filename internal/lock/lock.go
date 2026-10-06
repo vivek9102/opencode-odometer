@@ -10,8 +10,8 @@ import (
 )
 
 // pidAlive reports whether the given pid currently exists on this host.
-// On Windows it uses OpenProcess (a handle is obtained iff the process
-// exists); elsewhere it uses a zero-signal kill probe.
+// On Windows it checks the process exit status; elsewhere it uses a
+// zero-signal kill probe.
 func pidAlive(pid int) bool {
 	if pid <= 0 {
 		return false

@@ -148,9 +148,10 @@ func (c *Client) Health() error {
 
 // Session is a minimal session record.
 type Session struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Time  struct {
+	ID       string `json:"id"`
+	ParentID string `json:"parentID,omitempty"`
+	Title    string `json:"title"`
+	Time     struct {
 		Created int64 `json:"created"`
 		Updated int64 `json:"updated"`
 	} `json:"time"`
@@ -170,18 +171,18 @@ func (c *Client) Session() ([]Session, error) {
 // 2. properties.message
 // 3. direct properties (fields at the top level of properties)
 type rawAssistant struct {
-	ID          string     `json:"id"`
-	MessageID   string     `json:"messageID"`
-	SessionID   string     `json:"sessionID"`
-	Role        string     `json:"role"`
-	ProviderID  string     `json:"providerID"`
-	Provider    string     `json:"provider"`
-	ModelID     string     `json:"modelID"`
-	Model       string     `json:"model"`
-	Tokens      TokenUsage `json:"tokens"`
-	Cost        float64    `json:"cost"`
-	Finish      string     `json:"finish"`
-	Time        struct {
+	ID         string     `json:"id"`
+	MessageID  string     `json:"messageID"`
+	SessionID  string     `json:"sessionID"`
+	Role       string     `json:"role"`
+	ProviderID string     `json:"providerID"`
+	Provider   string     `json:"provider"`
+	ModelID    string     `json:"modelID"`
+	Model      string     `json:"model"`
+	Tokens     TokenUsage `json:"tokens"`
+	Cost       float64    `json:"cost"`
+	Finish     string     `json:"finish"`
+	Time       struct {
 		Created   int64 `json:"created"`
 		Completed int64 `json:"completed"`
 	} `json:"time"`

@@ -55,6 +55,8 @@ const PY = join(ODO_DIR, "opencode_monitor.py")
 
 // The odometer writes budget.json to its data dir (LOCALAPPDATA on Windows,
 // Application Support on macOS, XDG_DATA_HOME elsewhere).
+const PLUGIN_INSTANCE = `${process.pid}-${Date.now()}`
+
 const DATA_DIR =
   process.env.OPENCODE_ODOMETER_DIR ||
   (process.platform === "win32"
@@ -104,7 +106,7 @@ function resolveExe() {
 // OpenCode instance bound to (the default is 4096, but it increments when
 // taken, so a hardcoded port silently reads nothing). We are handed the real
 // `serverUrl`, so publish it for the odometer to discover.
-const SERVER_POINTER_FILE = join(homedir(), ".opencode-odometer-server.json")
+const SERVER_POINTER_FILE = process.env.OPENCODE_ODOMETER_SERVER_POINTER || join(homedir(), ".opencode-odometer-server.json")
 
 function publishServerUrl(serverUrl) {
   if (!serverUrl) return
@@ -174,6 +176,18 @@ function graceFile() {
 
 const SPOOL_MAX_BYTES = 4 * 1024 * 1024
 
+// Optional SDK work must never hold plugin initialization or a chat forever.
+async function sdkCall(call, ms = 2000) {
+  const controller = new AbortController()
+  let timer
+  try {
+    return await Promise.race([Promise.resolve().then(() => call(controller.signal)), new Promise((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error("Odometer SDK timeout")) }, ms)
+      timer.unref?.()
+    })])
+  } finally { clearTimeout(timer) }
+}
+
 function spoolFile() {
   const p = pointer()
   const dir = p?.data_dir || DATA_DIR
@@ -189,8 +203,8 @@ function spoolWrite(record) {
   try {
     const target = spoolFile()
 
-    if (record.type !== "message.removed") {
-      const sig = `${record.tokens.input}/${record.tokens.output}/${record.tokens.cache.read}/${record.tokens.cache.write}`
+    if (record.type === "message") {
+      const sig = `${record.tokens.input}/${record.tokens.output}/${record.tokens.reasoning}/${record.tokens.cache.read}/${record.tokens.cache.write}/${record.cost}/${record.finish}`
       if (lastSeen.get(record.id) === sig) return
       lastSeen.set(record.id, sig)
       // Bound the dedupe map; a long session must not leak memory.
@@ -264,17 +278,20 @@ function toRecord(msg, type) {
 // On first load, backfill any turns that happened while the odometer was not
 // running. The odometer keys on message id and upserts, so re-sending is
 // harmless.
-async function spoolBackfill(client) {
+async function spoolBackfill(client, observeSession) {
   try {
-    const sessions = await client.session.list?.()
+    const sessions = await sdkCall(signal => client.session.list?.({signal}))
     const list = Array.isArray(sessions) ? sessions : sessions?.data
     if (!Array.isArray(list)) return
+
+    // Preserve ownership of recent chats when the observed set is bounded.
+    for (const session of [...list].reverse()) observeSession(session)
 
     // Only the most recent few sessions: this runs on every OpenCode start.
     for (const s of list.slice(0, 5)) {
       const sid = s?.id
       if (!sid) continue
-      const msgs = await client.session.messages?.({ path: { id: sid } })
+      const msgs = await sdkCall(signal => client.session.messages?.({ path: { id: sid }, signal }))
       const items = Array.isArray(msgs) ? msgs : msgs?.data
       if (!Array.isArray(items)) continue
       for (const m of items) {
@@ -322,10 +339,10 @@ async function drainCommands(client) {
     if (!cmd || cmd.issued && now - cmd.issued > COMMAND_MAX_AGE) continue
     if (cmd.action !== "abort" || !cmd.sessionID) continue
     try {
-      await client.session.abort({ path: { id: cmd.sessionID } })
+      await sdkCall(signal => client.session.abort({ path: { id: cmd.sessionID }, signal }))
     } catch {
       try {
-        await client.session.abort({ path: { sessionID: cmd.sessionID } })
+        await sdkCall(signal => client.session.abort({ path: { sessionID: cmd.sessionID }, signal }))
       } catch {
         /* session already finished */
       }
@@ -363,6 +380,13 @@ function odometerAlive() {
 }
 
 function launch() {
+  try {
+    if(JSON.parse(readFileSync(join(pointer()?.data_dir || DATA_DIR,"launch-suppressed.json"),"utf8")).instances?.includes(PLUGIN_INSTANCE))return
+  }catch{/* no suppression */}
+  try {
+    const dir = pointer()?.data_dir || DATA_DIR
+    if (JSON.parse(readFileSync(join(dir, "preferences.json"), "utf8")).auto_start === false) return
+  } catch { /* default: attached to OpenCode startup */ }
   if (odometerAlive()) return
   if (Date.now() - lastLaunchAt < RELAUNCH_COOLDOWN_MS) return
   lastLaunchAt = Date.now()
@@ -371,7 +395,7 @@ function launch() {
   const validExe = resolveExe()
   if (validExe) {
     cmd = validExe
-    args = []
+    args = ["--autostart"]
     cwd = dirname(validExe)
   } else if (existsSync(PY)) {
     cmd = process.platform === "win32" ? "pythonw" : "python3"
@@ -445,6 +469,9 @@ function claimGrace(sessionID) {
         claims = {}
       }
     }
+    // One outstanding claim per chat until the odometer acknowledges it.
+    // Siblings cannot each consume the same advertised grace turn.
+    if (claims[sessionID] > 0) return false
     claims[sessionID] = (claims[sessionID] || 0) + 1
     // write-then-rename so the odometer never reads a partial file
     const tmp = `${target}.${process.pid}.tmp`
@@ -465,14 +492,13 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
   launch()
 
   // Catch up on anything spent while the odometer was closed.
-  spoolBackfill(client)
 
   let warned = new Set()
   let blockNotified = new Set()
 
   async function toast(title, message, variant) {
     try {
-      await client.tui.showToast({ body: { title, message, variant } })
+      await sdkCall(signal => client.tui.showToast({ body: { title, message, variant }, signal }))
     } catch {
       /* toast is best effort - never let UI failure affect the turn */
     }
@@ -489,81 +515,175 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     return err
   }
 
-  return {
-    event: async ({ event }) => {
-      // Execute anything the odometer asked for (e.g. STOP SESSION). Events
-      // fire continuously during a turn, so this stays responsive without a
-      // timer of its own.
-      drainCommands(client)
+  // Only public model metadata crosses the bridge; never credentials or headers.
+  const bridgeDir = () => pointer()?.data_dir || DATA_DIR
+  const pending = new Map()
+  const awaiting = new Map()
+  let inventory = []
+  const observedSessions = new Set()
+  const sessionParents = new Map()
+  function sessionBudget(doc, sid) {
+    const seen = new Set()
+    let root = sid
+    while (sessionParents.get(root) && !seen.has(root)) { seen.add(root); root = sessionParents.get(root) }
+    return doc?.sessions?.[root] || doc?.sessions?.[sid]
+  }
+  let bridgeWork = null
+  let inventoryBusy = false
+  let lastInventoryAttempt = 0
+  let lastHeartbeat = 0
+  function observeSession(session) {
+    const sid = session?.id
+    if (!sid) return
+    const parent = session.parentID || ""
+    if (sessionParents.get(sid) !== parent) {
+      sessionParents.set(sid, parent)
+      spoolWrite({type:"session", id:sid, parentID:parent})
+    }
+    observeID(sid, false)
+    if (parent) observeID(parent, false)
+    heartbeat()
+  }
+  function observeID(sid, force = true) {
+    if (!sid) return
+    if (observedSessions.has(sid)) {
+      observedSessions.delete(sid)
+      observedSessions.add(sid)
+      return
+    }
+    observedSessions.add(sid)
+    if (observedSessions.size > 100) observedSessions.delete(observedSessions.values().next().value)
+    heartbeat(force)
+  }
+  function atomicBridge(name, doc) {
+    const dir = bridgeDir()
+    mkdirSync(dir, { recursive: true })
+    const target = join(dir, name)
+    const tmp = `${target}.${process.pid}.tmp`
+    writeFileSync(tmp, JSON.stringify(doc), "utf8")
+    renameSync(tmp, target)
+  }
+  function writeSwitchStatus(req, status, detail) {
+    try { atomicBridge(`switch-status-${req.id}.json`, { ...req, status, detail }) } catch { /* UI can report timeout */ }
+  }
+  function category(key) {
+    const k = key.toLowerCase()
+    if (/embed|e5-|rerank/.test(k)) return "embedding"
+    if (/image|ocr/.test(k)) return "image"
+    if (/asr|realtime|audio|tts/.test(k)) return "audio"
+    return "chat"
+  }
+  function heartbeat(force = false) {
+    const now = Date.now()
+    if (!force && now-lastHeartbeat < 10_000) return
+    lastHeartbeat = now
+    try { atomicBridge(`models-${process.pid}.json`, { switch_protocol:3, pid: process.pid, instance:PLUGIN_INSTANCE, updated: Math.floor(Date.now()/1000), sessions: [...observedSessions], models: inventory }) } catch { /* bridge is optional */ }
+  }
+  async function refreshInventory() {
+    if (inventoryBusy) return
+    inventoryBusy = true
+    lastInventoryAttempt = Date.now()/1000
+    try {
+      const response = await sdkCall(signal => client.provider.list({signal}))
+      const doc = response?.data || response
+      if (!Array.isArray(doc?.all) || !Array.isArray(doc?.connected)) return
+      inventory = doc.all.filter(p => doc.connected.includes(p.id)).flatMap(p =>
+        Object.entries(p.models || {}).map(([id, m]) => ({
+          key: p.id + "/" + id, name: m.name || id, category: category(id),
+          // SDK-normalised zero rates can mean unknown for private providers.
+          // Do not turn them into claims that an unpriced model is free.
+          ...(m.cost && (m.cost.input > 0 || m.cost.output > 0) ? {rate: {input:m.cost.input,output:m.cost.output,cache_read:m.cost.cache_read || 0,cache_write:m.cost.cache_write || 0}} : {}),
+        })))
+      heartbeat(true)
+    } catch { /* unavailable SDK; backend config fallback remains visible */ }
+    finally { inventoryBusy = false }
+  }
+  function drainSwitch() {
+    if (bridgeWork) return bridgeWork
+    bridgeWork = consumeSwitch().finally(() => { bridgeWork = null })
+    return bridgeWork
+  }
+  // Durable selections belong to a chat, never to a process or its bounded
+  // ownership history. Claim only inside that chat's actual prompt hook.
+  function takeChatSelection(sid) {
+    if (!sid || !/^[a-zA-Z0-9_-]+$/.test(sid)) return
+    const target=join(bridgeDir(),`switch-session-${sid}.json`)
+    const claim=target+`.${process.pid}.claim`
+    let req
+    try { req=JSON.parse(readFileSync(target,"utf8")) } catch { return }
+    // Chat choices are read on every turn. Older one-request files retain
+    // their original semantics until the user makes a new persistent choice.
+    if (!req.persistent) {
+    try { renameSync(target,claim) } catch { return }
+    try {
+      req=JSON.parse(readFileSync(claim,"utf8"))
+    } catch { /* malformed selections must never break a prompt */ }
+    finally { rmSync(claim,{force:true}) }
+    }
+    if (!req?.id || !/^[a-zA-Z0-9-]+$/.test(req.id) || req.session_id!==sid) return
+    const previous=pending.get(sid)
+    if(previous) { pending.delete(sid);writeSwitchStatus(previous,"cancelled","Replaced by a newer selection.") }
+    const model=inventory.find(m=>m.key===req.key)
+    if (!model || model.category!=="chat") {
+      const detail=model ? "This specialised model cannot run a coding chat." : "The selected model is unavailable in this OpenCode instance. Choose another model."
+      writeSwitchStatus(req,"failed",detail)
+      // Never silently charge the default model when a saved choice fails.
+      throw hardLimitToolCancellation("Model switch failed",detail)
+    }
+    return req
+  }
+  async function consumeSwitch() {
+    try {
+      const target = join(bridgeDir(), `switch-${process.pid}.json`)
+      if (!existsSync(target)) return
+      const req = JSON.parse(readFileSync(target, "utf8"))
+      rmSync(target, {force:true})
+      if (!req?.id || !/^[a-zA-Z0-9-]+$/.test(req.id)) return
+      if (!req.session_id || !req.key || Date.now()/1000 - req.issued > 30) {
+        writeSwitchStatus(req,"expired","The selection expired before OpenCode received it."); return
+      }
+      const model = inventory.find(m => m.key === req.key)
+      if (!model || model.category !== "chat") {
+        writeSwitchStatus(req,"failed",model ? "This specialised model cannot run a coding chat." : "The model is not available in this OpenCode instance."); return
+      }
+      try {
+        const result = await sdkCall(signal => client.session.get({path:{id:req.session_id}, signal}))
+        if (result?.error || !result?.data?.id) throw new Error("Session unavailable")
+      } catch {writeSwitchStatus(req,"failed","The selected chat is unavailable in OpenCode.");return}
+      const prev=pending.get(req.session_id)
+      if (prev) writeSwitchStatus(prev,"cancelled","Replaced by a newer selection.")
+      pending.set(req.session_id,req)
+      writeSwitchStatus(req,"queued","Ready for the next request in this chat. The current response continues.")
+    } catch { /* malformed bridge request must never break a turn */ }
+  }
+  // Provider initialization can depend on Plugin.init(). Awaiting /provider
+  // here forms a cycle and leaves OpenCode on a blank startup screen.
+  heartbeat(true)
+  const startupTimer = setTimeout(() => {
+    refreshInventory()
+    spoolBackfill(client, observeSession)
+  }, 0)
+  startupTimer.unref?.()
+  const bridgeTimer=setInterval(() => {
+    heartbeat()
+    drainSwitch()
+    drainCommands(client)
+    const now=Date.now()/1000
+    if(!inventory.length && !inventoryBusy && now-lastInventoryAttempt>=5) void refreshInventory()
+    for (const [sid,req] of pending) if(now-req.issued>600) {pending.delete(sid);writeSwitchStatus(req,"expired","No request was submitted within ten minutes.")}
+    for (const [sid,req] of awaiting) if(now-req.applied_at>120) {awaiting.delete(sid);writeSwitchStatus(req,"unconfirmed","Request was routed; OpenCode has not confirmed the response model.")}
+  }, 1000)
+  bridgeTimer.unref?.()
+  const inventoryTimer=setInterval(refreshInventory, 60_000)
+  inventoryTimer.unref?.()
 
-      // Feed the odometer. This is the ingest path that works when OpenCode
-      // has no TCP listener, which is the default for the TUI.
-      if (event.type === "message.updated" || event.type === "message.created") {
-        const rec = toRecord(event.properties?.info || event.properties?.message || event.properties)
-        if (rec) spoolWrite(rec)
-      } else if (event.type === "message.removed") {
-        const id = event.properties?.messageID
-        if (id) {
-          spoolWrite({ type: "message.removed", id })
-          lastSeen.delete(id)
-        }
-      }
-
-      if (event.type === "session.created") {
-        // Re-publish on activity: the odometer may have been started later,
-        // or the pointer removed, and a session is the moment it matters.
-        publishServerUrl(serverUrl)
-        launch()
-      }
-      // a session that drops back under its cap can warn/block again later
-      if (event.type === "session.idle") {
-        const doc = readBudget()
-        const s = doc?.sessions?.[event.properties?.sessionID]
-        if (s && s.state === "ok") {
-          warned.delete(event.properties.sessionID)
-          blockNotified.delete(event.properties.sessionID)
-        }
-      }
-      if (event.type === "session.compacted" || event.type === "experimental.session.compacting") {
-        launch()
-      }
-    },
-
-    "tool.execute.before": async (input) => {
+  async function enforceChat(input) {
       if (process.env.OPENCODE_ODOMETER_NOBLOCK === "1") return
 
       const doc = readBudget()
       if (!doc || !doc.enabled) return
 
-      const sid = input.sessionID
-      const s = doc.sessions?.[sid]
-      if (!s) return
-
-      if (s.state === "over" && s.enforced !== false) {
-        const mode = s.mode || doc.mode || "soft"
-        if (mode === "hard" || s.past_hard_stop) {
-          const reason = s.past_hard_stop ? "Hard stop reached" : "Budget exceeded"
-          // State the way out. A block that only reports the number leaves the
-          // user stuck mid-task with no indication that the limit is theirs to
-          // lift, and the spend has already happened either way.
-          const detail =
-            `$${s.cost.toFixed(2)} of $${s.limit} spent in this session. Tool execution blocked.\n` +
-            `This limit is PER SESSION; other sessions are unaffected.\n` +
-            `In the Odometer: "LET THIS ONE FINISH" to continue, "DOUBLE IT" to raise the limit, ` +
-            `or untick SESSION LIMIT to stop enforcing.`
-          await toast(reason, detail, "error")
-          throw hardLimitToolCancellation(reason, detail)
-        }
-      }
-    },
-
-    "chat.message": async (input) => {
-      if (process.env.OPENCODE_ODOMETER_NOBLOCK === "1") return
-
-      const doc = readBudget()
-      if (!doc || !doc.enabled) return
-
-      const s = doc.sessions?.[input.sessionID]
+      const s = sessionBudget(doc, input.sessionID)
       if (!s) return
 
       const sid = input.sessionID
@@ -609,7 +729,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       // nearly-finished task can land and the typed prompt is not lost.
       // Never granted past the hard ceiling - that is the runaway-loop guard.
       if (mode === "soft" && !s.past_hard_stop && (s.grace_remaining || 0) > 0) {
-        if (claimGrace(sid)) {
+        if (claimGrace(s.budget_session_id || sid)) {
           await toast(
             "Budget reached - one grace turn",
             `$${s.cost.toFixed(2)} of $${s.limit}. This turn is allowed; the ` +
@@ -644,12 +764,12 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       // instead of an unhandled-plugin-exception stack trace.
       let aborted = false
       try {
-        await client.session.abort({ path: { id: sid } })
+        await sdkCall(signal => client.session.abort({ path: { id: sid }, signal }))
         aborted = true
       } catch {
         try {
           // older/newer SDKs name the path param differently
-          await client.session.abort({ path: { sessionID: sid } })
+          await sdkCall(signal => client.session.abort({ path: { sessionID: sid }, signal }))
           aborted = true
         } catch {
           /* fall through to throwing */
@@ -660,7 +780,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
         // Give the abort a moment to land, then leave quietly. The turn is
         // already cancelled; throwing on top would re-introduce the ugly error.
         await new Promise((r) => setTimeout(r, 50))
-        return
+        return false
       }
 
       // Fallback only: abort unavailable. Mimic OpenCode's own cancellation
@@ -669,6 +789,122 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       err.name = "MessageAbortedError"
       err.data = { message: `${reason} - ${detail}` }
       throw err
+  }
+
+  return {
+    event: async ({ event }) => {
+      // Execute anything the odometer asked for (e.g. STOP SESSION). Events
+      // fire continuously during a turn, so this stays responsive without a
+      // timer of its own.
+      await drainCommands(client)
+
+      void drainSwitch()
+      const info=event.properties?.info || event.properties?.message
+      const sid=info?.sessionID || event.properties?.sessionID
+      if (event.type === "session.created" || event.type === "session.updated") observeSession(info)
+      if (sid) observeID(sid)
+      if (info?.role === "assistant") {
+        const req=awaiting.get(info.sessionID)
+        if(req && info.parentID === req.message_id) {
+          awaiting.delete(info.sessionID)
+          const actual=info.providerID + "/" + info.modelID
+          writeSwitchStatus(req,actual === req.key ? "confirmed" : "failed",actual === req.key ? (req.persistent ? "OpenCode confirmed this model. It stays active for this chat." : "OpenCode confirmed the response model.") : "OpenCode responded with " + actual)
+        }
+      }
+      if (event.type === "session.error") {
+        const req=awaiting.get(sid);if(req){awaiting.delete(sid);writeSwitchStatus(req,"failed","OpenCode reported a request error.")}
+      }
+      // Feed the odometer. This is the ingest path that works when OpenCode
+      // has no TCP listener, which is the default for the TUI.
+      if (event.type === "message.updated" || event.type === "message.created") {
+        const rec = toRecord(event.properties?.info || event.properties?.message || event.properties)
+        if (rec) spoolWrite(rec)
+      } else if (event.type === "message.removed") {
+        const id = event.properties?.messageID
+        if (id) {
+          spoolWrite({ type: "message.removed", id })
+          lastSeen.delete(id)
+        }
+      }
+
+      if (event.type === "session.created") {
+        // Re-publish on activity: the odometer may have been started later,
+        // or the pointer removed, and a session is the moment it matters.
+        publishServerUrl(serverUrl)
+        launch()
+      }
+      // a session that drops back under its cap can warn/block again later
+      if (event.type === "session.idle") {
+        const doc = readBudget()
+        const s = doc?.sessions?.[event.properties?.sessionID]
+        if (s && s.state === "ok") {
+          warned.delete(event.properties.sessionID)
+          blockNotified.delete(event.properties.sessionID)
+        }
+      }
+      if (event.type === "session.compacted" || event.type === "experimental.session.compacting") {
+        launch()
+      }
+    },
+
+    "tool.execute.before": async (input) => {
+      if (process.env.OPENCODE_ODOMETER_NOBLOCK === "1") return
+
+      const doc = readBudget()
+      if (!doc || !doc.enabled) return
+
+      const sid = input.sessionID
+      const s = sessionBudget(doc, sid)
+      if (!s) return
+
+      if (s.state === "over" && s.enforced !== false) {
+        const mode = s.mode || doc.mode || "soft"
+        if (mode === "hard" || s.past_hard_stop) {
+          const reason = s.past_hard_stop ? "Hard stop reached" : "Budget exceeded"
+          // State the way out. A block that only reports the number leaves the
+          // user stuck mid-task with no indication that the limit is theirs to
+          // lift, and the spend has already happened either way.
+          const detail =
+            `$${s.cost.toFixed(2)} of $${s.limit} spent in this session. Tool execution blocked.\n` +
+            `This limit is PER SESSION; other sessions are unaffected.\n` +
+            `In the Odometer: "LET THIS ONE FINISH" to continue, "DOUBLE IT" to raise the limit, ` +
+            `or untick SESSION LIMIT to stop enforcing.`
+          await toast(reason, detail, "error")
+          throw hardLimitToolCancellation(reason, detail)
+        }
+      }
+    },
+
+    "chat.message": async (input, output) => {
+      observeID(input.sessionID)
+      await drainCommands(client)
+      await drainSwitch()
+      const allowed = await enforceChat(input)
+      if (allowed === false) return
+      // Budget checks happen before claiming: a blocked turn keeps its choice.
+      if (!output?.message) return
+      if (existsSync(join(bridgeDir(),`switch-session-${input.sessionID}.json`)) && !inventory.length) await refreshInventory()
+      const durable = takeChatSelection(input.sessionID)
+      const req = durable || pending.get(input.sessionID)
+      if (!req) return
+      if (!durable && Date.now() / 1000 - req.issued > 600) {
+        pending.delete(input.sessionID)
+        writeSwitchStatus(req, "expired", "No request was submitted within ten minutes.")
+        return
+      }
+      if (!output?.message) {
+        writeSwitchStatus(req, "failed", "This OpenCode version does not expose a mutable chat message.")
+        pending.delete(input.sessionID)
+        return
+      }
+      const slash = req.key.indexOf("/")
+      output.message.model = { providerID: req.key.slice(0, slash), modelID: req.key.slice(slash + 1) }
+      delete output.message.variant
+      req.message_id = output.message.id
+      req.applied_at = Date.now() / 1000
+      pending.delete(input.sessionID)
+      awaiting.set(input.sessionID, req)
+      writeSwitchStatus(req, "applied", req.persistent ? "Applied to this message. This model stays active for the chat." : "Applied to the next request; awaiting OpenCode's response.")
     },
   }
 }

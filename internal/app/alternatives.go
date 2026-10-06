@@ -3,8 +3,6 @@ package app
 import (
 	"sort"
 	"strings"
-
-	"github.com/vivek9102/opencode-odometer/internal/prices"
 )
 
 // Alternative is a cheaper model suggested as a substitute for the one that
@@ -19,118 +17,26 @@ type Alternative struct {
 	Input    float64 `json:"input"`
 	Output   float64 `json:"output"`
 	Free     bool    `json:"free"`
-	// Ratio is the alternative's output price as a fraction of the current
-	// model's, so "38% of current" can be shown rather than a bare price.
-	Ratio float64 `json:"ratio"`
+	// Ratio compares equal input/output tokens. It is an explicit price
+	// comparison rather than a promise about the next request's token mix.
+	Ratio      float64 `json:"ratio"`
+	Unknown    bool    `json:"unknown"`
+	Estimated  bool    `json:"estimated"`
+	Source     string  `json:"source"`
+	Category   string  `json:"category"`
+	Current    bool    `json:"current"`
+	Cheaper    bool    `json:"cheaper"`
+	Comparable bool    `json:"comparable"`
 }
 
-// notSubstitutes are models too weak or too specialised to recommend as a
-// coding substitute, whatever their price. Suggesting an embedding model or a
-// nano tier as an Opus replacement is worse than suggesting nothing.
-var notSubstitutes = []string{
-	"embed", "image", "-vl-", "nano", "gemma", "e5-",
-	"titan", "ocr", "asr", "realtime", "translate", "guard", "rerank",
-}
-
-// floorRatio excludes models priced under this fraction of the current one:
-// anything that much cheaper is a different class of model, not a substitute.
-const floorRatio = 0.05
-
-// CheaperThan returns credible cheaper substitutes for a model key.
-//
-// Free models are always offered first (they end the spend outright), then
-// paid models ranked closest-in-capability first. Alternatives from the same
-// provider are preferred because those are the ones actually selectable in
-// the user's OpenCode configuration.
+// CheaperThan includes every configured cheaper or free option, without a
+// capability floor or result cap. Specialised models carry a category label.
 func (a *App) CheaperThan(key string) []Alternative {
-	if key == "" {
-		return nil
-	}
-	a.Prices.RLockModels()
-	models := make(map[string]prices.Rate, len(a.Prices.Models))
-	for k, v := range a.Prices.Models {
-		models[k] = v
-	}
-	a.Prices.RUnlockModels()
-
-	cur, ok := models[key]
-	if !ok {
-		cur = a.Prices.Entry(key)
-	}
-	base := cur.Output
-	if base <= 0 {
-		return nil
-	}
-
-	provider := key
-	if i := strings.Index(key, "/"); i >= 0 {
-		provider = key[:i]
-	}
-
-	// Only suggest models the user has actually seen in use or that share the
-	// current provider; a global catalogue dump is noise.
-	a.mu.RLock()
-	seen := make(map[string]bool, len(a.state.SeenModels))
-	for k := range a.state.SeenModels {
-		seen[k] = true
-	}
-	a.mu.RUnlock()
-
-	var free, paid []Alternative
-	for k, m := range models {
-		if k == key {
-			continue
+	var out []Alternative
+	for _, m := range a.ModelChoices(key) {
+		if !m.Current && m.Cheaper {
+			out = append(out, m)
 		}
-		low := strings.ToLower(k)
-		skip := false
-		for _, bad := range notSubstitutes {
-			if strings.Contains(low, bad) {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			continue
-		}
-		sameProvider := strings.HasPrefix(k, provider+"/")
-		if !sameProvider && !seen[k] {
-			continue
-		}
-
-		name := k
-		if m.Name != "" {
-			name = m.Name
-		}
-		altProvider := k
-		if i := strings.Index(k, "/"); i >= 0 {
-			altProvider = k[:i]
-		}
-		if m.Free {
-			free = append(free, Alternative{
-				Key: k, Name: name, Provider: altProvider, Free: true, Ratio: 0,
-			})
-			continue
-		}
-		if m.Output <= 0 || m.Output >= base {
-			continue
-		}
-		if m.Output/base < floorRatio {
-			continue
-		}
-		paid = append(paid, Alternative{
-			Key: k, Name: name, Provider: altProvider,
-			Input: m.Input, Output: m.Output,
-			Ratio: m.Output / base,
-		})
-	}
-
-	sort.Slice(free, func(i, j int) bool { return free[i].Key < free[j].Key })
-	// closest in capability first: the most expensive of the cheaper options
-	sort.Slice(paid, func(i, j int) bool { return paid[i].Ratio > paid[j].Ratio })
-
-	out := append(free, paid...)
-	if len(out) > 8 {
-		out = out[:8]
 	}
 	return out
 }
@@ -143,7 +49,7 @@ func (a *App) TopSpenders(sid string, n int) []Alternative {
 	}
 	totals := map[string]float64{}
 	for _, rec := range a.Ledger.GetMessagesSnapshot() {
-		if rec.SessionID != sid {
+		if a.ChatRoot(rec.SessionID) != a.ChatRoot(sid) {
 			continue
 		}
 		totals[rec.Provider+"/"+rec.Model] += rec.Cost

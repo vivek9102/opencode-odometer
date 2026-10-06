@@ -34,6 +34,7 @@ type RatePoint struct {
 type State struct {
 	Ledger          *ledger.Store      `json:"ledger"`
 	BudgetBaselines map[string]float64 `json:"budget_baselines"`
+	SessionParents  map[string]string  `json:"session_parents,omitempty"`
 	BudgetAllow     map[string]float64 `json:"budget_allow"`
 	GraceUsed       map[string]int     `json:"grace_used"`
 	SeenModels      map[string]bool    `json:"seen_models,omitempty"`
@@ -87,6 +88,7 @@ type App struct {
 	cfg   Config
 
 	mu           sync.RWMutex
+	saveMu       sync.Mutex
 	syncMu       sync.Mutex
 	state        State
 	graceUsed    map[string]int
@@ -106,8 +108,12 @@ type App struct {
 	sessionUpdatedMu sync.Mutex
 	sessionUpdated   map[string]int64
 
-	rateMu     sync.Mutex
-	rateWindow []RatePoint
+	rateMu      sync.Mutex
+	rateWindow  []RatePoint
+	liveCharges map[string]float64
+	charged     map[string]bool
+	lastCharge  Charge
+	charges     []Charge
 }
 
 // New loads prices, state and budget config.
@@ -168,32 +174,20 @@ func New(cfg Config) (*App, error) {
 	a.reclassifyFreeModels()
 	a.healTripBaseline()
 
-	// Enforcement always starts OFF.
-	//
-	// The limit is a deliberate act, not a background default: leaving it
-	// armed across restarts meant a session could be blocked by a cap the
-	// user had forgotten setting, with no obvious way back. Ticking the box
-	// starts a fresh count from zero (see SetEnabled), which makes the
-	// control mean exactly what it says.
-	a.Budget.Cfg.Enabled = false
-	a.mu.Lock()
-	a.state.BudgetBaselines = map[string]float64{}
-	a.state.BudgetAllow = map[string]float64{}
-	a.graceUsed = map[string]int{}
-	a.state.GraceUsed = a.graceUsed
-	a.mu.Unlock()
+	// Restore an armed limit with its existing tally. Relaunching the widget
+	// must not silently disable enforcement or give the session a fresh cap.
 
 	// A repaired baseline must reach disk immediately: otherwise the next
 	// start reloads the broken value and TRIP reads zero again until some
 	// unrelated change happens to trigger a save.
 	a.SaveState()
 
-	// Publish the disarmed state now. budget.json is the plugin's only source
-	// of truth and still holds the previous run's settings, so until it is
-	// rewritten the plugin would keep enforcing a limit the UI shows as off.
-	// PublishBudget skips unseeded ledgers, so write the header directly.
-	if err := a.Contract.WriteBudget(plugin.BudgetFile{
-		Enabled:           false,
+	// Republish restored verdicts immediately. For a fresh, unseeded ledger,
+	// PublishBudget skips writing, so publish its configuration directly.
+	if a.Seeded() {
+		a.PublishBudget()
+	} else if err := a.Contract.WriteBudget(plugin.BudgetFile{
+		Enabled:           a.Budget.Enabled() && !a.Preferences().Paused,
 		SessionLimitUSD:   a.Budget.Limit(),
 		WarnAtPercent:     a.Budget.Cfg.WarnAtPercent,
 		BlockWhenExceeded: a.Budget.Cfg.BlockWhenExceeded,
@@ -296,6 +290,7 @@ func (a *App) loadState() {
 		a.state.BudgetAllow = map[string]float64{}
 	}
 	a.state.GraceUsed = st.GraceUsed
+	a.state.SessionParents = st.SessionParents
 	if a.state.GraceUsed == nil {
 		a.state.GraceUsed = map[string]int{}
 	}
@@ -387,6 +382,10 @@ func (a *App) applyLedger(st *ledger.Store) {
 // Saving in that situation replaces a full history with whatever this run
 // happened to collect, which is how a 6906-message ledger became 20.
 func (a *App) SaveState() {
+	// UI controls and ingest callbacks can save concurrently. Serialize the
+	// complete snapshot/write so they cannot share or replace the same temp file.
+	a.saveMu.Lock()
+	defer a.saveMu.Unlock()
 	a.mu.RLock()
 	blocked := a.loadFailed
 	a.mu.RUnlock()
@@ -403,6 +402,10 @@ func (a *App) SaveState() {
 	a.state.BudgetAllow = a.allowLocked()
 	a.state.GraceUsed = a.graceUsedLocked()
 	stCopy := a.state
+	stCopy.SessionParents = make(map[string]string, len(a.state.SessionParents))
+	for sid, parent := range a.state.SessionParents {
+		stCopy.SessionParents[sid] = parent
+	}
 	stCopy.Ledger = a.Ledger.Copy()
 	a.mu.Unlock()
 
@@ -428,7 +431,17 @@ func (a *App) SaveState() {
 		log.Printf("[state] write: %v", err)
 		return
 	}
-	if err := os.Rename(tmp, a.cfg.StateFile); err != nil {
+	var renameErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		renameErr = os.Rename(tmp, a.cfg.StateFile)
+		if renameErr == nil || !os.IsPermission(renameErr) || attempt == 5 {
+			break
+		}
+		// Windows readers and antivirus can hold a brief non-delete-sharing
+		// handle. Keep the existing state intact and retry the atomic replacement.
+		time.Sleep(time.Duration(10<<attempt) * time.Millisecond)
+	}
+	if err := renameErr; err != nil {
 		log.Printf("[state] rename: %v", err)
 	}
 }
@@ -566,11 +579,13 @@ func (a *App) ApplyMessage(m opencode.Message) bool {
 
 	a.Ledger.RLock()
 	prevCost := 0.0
+	_, existed = a.Ledger.Messages[m.ID]
 	if prev, ok := a.Ledger.Messages[m.ID]; ok {
 		prevCost = prev.Cost
 	}
 	a.Ledger.RUnlock()
 
+	a.trackCharge(m, cost, existed)
 	gained := cost - prevCost
 	if gained > 0 && a.Seeded() {
 		a.rateMu.Lock()
@@ -579,6 +594,9 @@ func (a *App) ApplyMessage(m opencode.Message) bool {
 	}
 
 	ts := time.Now().Format("2006-01-02 15:04:05")
+	if existed && previous.Timestamp != "" {
+		ts = previous.Timestamp
+	}
 	if m.TimeCreated > 0 {
 		sec := m.TimeCreated / 1000
 		nsec := (m.TimeCreated % 1000) * 1e6
@@ -705,12 +723,21 @@ func (a *App) PublishBudget() {
 	// First fold in any grace claims the plugin recorded.
 	if _, err := a.Contract.AbsorbGraceClaims(a.graceUsed); err == nil {
 	}
+	// Previously independent children may already have claimed grace.
+	// Fold these into the shared owner so discovering ancestry cannot grant
+	// another turn to the same chat.
+	for sid, used := range a.graceUsed {
+		if root := budgetRoot(sid, a.state.SessionParents); root != sid {
+			a.graceUsed[root] += used
+			delete(a.graceUsed, sid)
+		}
+	}
 	if !a.state.Seeded {
 		return
 	}
 
 	doc := plugin.BudgetFile{
-		Enabled:           a.Budget.Enabled(),
+		Enabled:           a.Budget.Enabled() && !a.Preferences().Paused,
 		SessionLimitUSD:   a.Budget.Limit(),
 		WarnAtPercent:     a.Budget.Cfg.WarnAtPercent,
 		BlockWhenExceeded: a.Budget.Cfg.BlockWhenExceeded,
@@ -720,11 +747,10 @@ func (a *App) PublishBudget() {
 		Sessions:          map[string]plugin.Session{},
 	}
 
-	baselines := a.state.BudgetBaselines
 	allow := a.state.BudgetAllow
 	hardX := a.Budget.HardStopAt()
 
-	sessions := a.Ledger.GetPerSessionSnapshot()
+	sessions, baselines := a.budgetSnapshotLocked()
 
 	// Drop sessions that can never be blocked. Abandoned tabs accumulate
 	// indefinitely (a real run showed 59 of 60 published sessions sitting at
@@ -736,7 +762,8 @@ func (a *App) PublishBudget() {
 	// entry would silently hand the session a clean slate.
 	live := make(map[string]ledger.SessionStat, len(sessions))
 	for sid, st := range sessions {
-		if st.Cost > 0 || allow[sid] > 0 || a.graceUsed[sid] > 0 || baselines[sid] > 0 {
+		root := budgetRoot(sid, a.state.SessionParents)
+		if st.Cost > 0 || allow[root] > 0 || a.graceUsed[root] > 0 || baselines[root] > 0 {
 			live[sid] = st
 		}
 	}
@@ -767,26 +794,28 @@ func (a *App) PublishBudget() {
 	}
 
 	for sid, st := range sessions {
+		root := budgetRoot(sid, a.state.SessionParents)
 		s := &budget.Session{
 			Budget:    a.Budget,
-			Baseline:  baselines[sid],
-			Allow:     allow[sid],
-			GraceUsed: a.graceUsed[sid],
+			Baseline:  baselines[root],
+			Allow:     allow[root],
+			GraceUsed: a.graceUsed[root],
 		}
 		eff := s.EffCost(st.Cost)
 		state, frac := s.State(eff)
 		remaining := s.RemainingGrace(eff)
 
 		doc.Sessions[sid] = plugin.Session{
-			Cost:           round6(eff),
-			State:          string(state),
-			Fraction:       round4(frac),
-			Limit:          a.Budget.Limit(),
-			Mode:           string(a.Budget.Mode()),
-			GraceRemaining: remaining,
-			HardStopAt:     hardX,
-			PastHardStop:   s.PastHardStop(eff),
-			Enforced:       a.Budget.Blocks(),
+			BudgetSessionID: root,
+			Cost:            round6(eff),
+			State:           string(state),
+			Fraction:        round4(frac),
+			Limit:           a.Budget.Limit(),
+			Mode:            string(a.Budget.Mode()),
+			GraceRemaining:  remaining,
+			HardStopAt:      hardX,
+			PastHardStop:    s.PastHardStop(eff),
+			Enforced:        a.Budget.Blocks() && !a.Preferences().Paused,
 		}
 	}
 
@@ -810,20 +839,21 @@ type SessionBudget struct {
 // ActiveSessionBudget returns the verdict for the most recently active
 // session — the one a limit would actually block.
 func (a *App) ActiveSessionBudget() SessionBudget {
-	sid := a.Ledger.ActiveSession()
+	sid := a.ActiveChat()
 	if sid == "" {
 		return SessionBudget{State: "ok"}
 	}
-	sessions := a.Ledger.GetPerSessionSnapshot()
+	a.mu.RLock()
+	sessions, baselines := a.budgetSnapshotLocked()
 	st, ok := sessions[sid]
 	if !ok {
+		a.mu.RUnlock()
 		return SessionBudget{SessionID: sid, State: "ok"}
 	}
 
-	a.mu.RLock()
 	s := &budget.Session{
 		Budget:    a.Budget,
-		Baseline:  a.state.BudgetBaselines[sid],
+		Baseline:  baselines[sid],
 		Allow:     a.state.BudgetAllow[sid],
 		GraceUsed: a.graceUsed[sid],
 	}
@@ -851,8 +881,8 @@ func (a *App) ActiveSessionBudget() SessionBudget {
 	}
 }
 
-// Rebase snapshots current per-session spend so enabling the limit (or
-// changing it) never retroactively blocks a session, and resets grace.
+// Rebase snapshots current per-session spend when enabling a new limit
+// period. Updating an already enabled limit preserves spend and grace.
 func (a *App) Rebase(clearOverrides bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -889,8 +919,8 @@ func (a *App) AllowMore(sid string, cost float64, limit float64) {
 // RaiseLimit doubles the session limit.
 func (a *App) RaiseLimit() {
 	a.Budget.Cfg.SessionLimitUSD = round4(a.Budget.Limit() * 2)
-	a.Rebase(true)
 	a.PublishBudget()
+	a.SaveState()
 }
 
 // Disable turns enforcement off.

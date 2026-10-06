@@ -32,22 +32,36 @@ This exists for three cases it does not cover:
 | **Spend limits** | none | per-session cap that blocks the turn |
 | **Providers that report no cost** | shows `$0.00` | prices locally from your own table |
 
-That last row is the reason this was built. Some providers — internal company
-gateways, resellers, self-hosted proxies — return **no cost field at all**. On
-the setup this was written for, sampling 233 messages with real token usage
-found **every single one reported `cost: 0`**, despite large cache reads. If
-that is your situation, the built-in number is not slightly wrong, it is
-meaningless. See [Private pricing](#private-pricing).
+Some gateways, resellers and self-hosted proxies report no cost even when
+they return token usage. Odometer can price that usage locally. See
+[Private pricing](#private-pricing).
 
 ---
 
 ## Features
 
+- Starts as a compact bar; OpenCode auto-launch docks it bottom-centre above the taskbar.
+- **Settings** has Start with OpenCode, idle dimming, optional outside-click collapse,
+  and enforcement pause. Pausing keeps counting spend and resumes the same budget period.
+- Click the expand arrow for spending details and a ten-minute spending sparkline.
+  Switch the readout between spent and remaining. Hover keeps the window still.
+- A chat's delegated child sessions share its spending cap and grace allowance.
+- Completed live charges briefly show a `+$0.023` tick; replayed history stays quiet.
+- Windows system tray provides show, hide, pause/resume and quit. Quit suppresses
+  relaunch in existing OpenCode instances; a fresh OpenCode launch follows Settings.
+- **Models** searches all models supplied by connected OpenCode providers, with
+  Free + cheaper, Free and All filters. Unknown and estimated rates are labelled;
+  cheaper compares equal input/output token counts. Specialised models stay visible.
+- Choose **SWITCH MODEL** from either the model picker or the limit-reached
+  screen. It applies from the next message and stays selected for that chat,
+  including after a restart. The current response continues and the budget is
+  preserved. See [Switching models](#switching-models).
+- Open the rebuilt executable once, then restart OpenCode to activate the updated
+  bundled plugin. Model routing requires a chat observed by that plugin.
+
 - **Live odometer** — mechanical-style counter, TRIP (resettable) and TOTAL.
 - **Cache-aware pricing** — `input`, `output`, `cache_read` and `cache_write`
-  priced separately. This matters more than it sounds: on real traffic cache
-  reads were **83% of all tokens**, and pricing only input+output understates
-  true cost by roughly **8×**.
+  priced separately, so cached tokens use the appropriate rate.
 - **Per-session budget**, tiered — `warn` / `soft` / `hard`. Counts only spend
   *from the moment you enable it*, so switching it on never retroactively locks
   a session in progress.
@@ -194,7 +208,8 @@ truth.
 
 **The limit applies per session, not globally.** Three chats with a $5 limit
 means $15 of total headroom — it is a per-chat cap, not a shared pot. The bar
-tracks the active session, since that is what will actually block.
+tracks the active chat, including its delegated child sessions. Those children
+share the parent cap and grace allowance.
 
 | Mode | Behaviour |
 |---|---|
@@ -211,21 +226,62 @@ limit can still rescue the session.
 
 ---
 
+Enabling a limit starts a new spending period. Changing an enabled limit,
+resetting TRIP, pausing enforcement, or restarting Odometer preserves that
+period's spend and grace usage. Pause keeps recording costs; resume enforces
+the existing cap.
+
+## Switching models
+
+1. Open **MODELS**, or choose a model on the limit-reached screen.
+2. Click **SWITCH MODEL**. The next message uses that model, and later messages
+   in the same chat keep using it until you replace or clear the choice.
+3. Odometer confirms the choice when the matching assistant response reports
+   the selected model. Other chats keep their own selections.
+4. To return control to OpenCode, click **Use OpenCode selection** in the model
+   picker, then select a model with OpenCode's `/model` command. Selecting again
+   in Odometer saves a new choice for this chat.
+
+The current plugin API does not expose a reliable native model-selection
+event. While an Odometer choice is saved, `/model` alone does not clear it;
+OpenCode's displayed selection may differ from the model used for requests.
+Specialised models remain listed but cannot be selected for a coding chat.
+An unavailable saved model produces an error instead of silently falling
+back to the default.
+
+After installing an updated bundled plugin, run Odometer once and restart
+OpenCode. Send a message in the target chat so the plugin can observe it.
+UI-only updates do not require another OpenCode restart.
+
+## Startup and system tray
+
+**Settings → Start with OpenCode** controls automatic startup. Turn it off
+to launch Odometer manually from its executable or a shortcut. Open Settings
+and turn it on again to restore automatic startup. Tracking and budget
+settings are preserved.
+
+**Hide to tray** keeps Odometer running. Find its icon near the Windows clock
+(or under the hidden-icons arrow), then double-click it or choose **Show**
+from its menu. **Quit** exits Odometer and suppresses relaunch in already
+running OpenCode instances; a fresh OpenCode launch follows the startup setting.
+
 ## Controls
 
 | Action | How |
 |---|---|
-| Expand / collapse | Double-click bar, or <kbd>Esc</kbd> to collapse |
+| Expand / collapse | Click the expand arrow or double-click the bar; <kbd>Esc</kbd> collapses |
 | Move | Drag the bar |
 | Cycle dock position | <kbd>F2</kbd> or `DOCK` |
 | TRIP / TOTAL | Click the odometer or `TRIP / TOTAL` |
 | Reset trip | `RESET TRIP` |
 | Download catalog for future usage | `UPDATE CATALOG` |
 | Review, update, or reset private-provider prices | `CUSTOM PROVIDER PRICES` |
-| Cheaper alternatives | `CHEAPER MODELS` |
+| Search and switch models | `MODELS`, or the limit-reached screen |
+| Spent / remaining | Click the reading label in spending details |
+| Startup / idle / pause settings | `SETTINGS` |
 | Abort the active session | `STOP SESSION` |
 | Export ledger | `EXPORT CSV` |
-| Quit / minimise | Right-click the bar |
+| Hide to tray / quit | Right-click the bar; restore from the Windows tray |
 
 ---
 
@@ -247,6 +303,23 @@ Data lives in `%LOCALAPPDATA%\OpenCodeOdometer\` on Windows,
 
 ---
 
+## Optional event diagnostics
+
+The separate `plugin/event-diagnostics.js` troubleshooting plugin is off by
+default. To use it, copy it into OpenCode's plugin directory and remove the
+older `test-events.js` full-event logger if installed. Set
+`OPENCODE_EVENT_DIAGNOSTICS=1` before starting OpenCode.
+
+It records metadata summaries without prompt or response text, coalesces
+streaming updates, flushes asynchronously every 250 ms, and rotates at 1 MB
+with one previous file. Summaries still include session and message identifiers,
+model names and usage; keep the logs private. Unflushed entries can be lost on
+exit. Budget accounting uses Odometer's separate event spool.
+
+`OPENCODE_EVENT_DIAGNOSTICS_FILE` overrides the default
+`~/.opencode/test-events.log`. OpenCode's own logs remain available when this
+optional logger is disabled.
+
 ## Troubleshooting
 
 The log is `opencode_odometer_events.log` in the data directory.
@@ -258,6 +331,9 @@ The log is `opencode_odometer_events.log` in the data directory.
 | `stream disconnected: dial tcp ...:4096` | **Normal** — in-process API |
 | Window never appears | WebView2 runtime missing |
 | Nothing happens on launch | Another instance holds the lock |
+| Model picker asks for a restart | Run the updated Odometer, restart OpenCode, then send a message in that chat |
+| `/model` seems ignored | Clear the saved choice with **Use OpenCode selection** first |
+| Hidden window | Restore it from the tray icon, including Windows' hidden-icons area |
 
 If cost stops updating, the plugin may be writing somewhere the odometer is not
 reading. Check `~/.opencode-odometer.json` — its `data_dir` should match the
@@ -272,6 +348,8 @@ go test ./...
 go vet ./...
 node --check plugin\odometer.js
 node --check frontend\dist\main.js
+node --check frontend\dist\experience.js
+node --test plugin\*.test.mjs
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

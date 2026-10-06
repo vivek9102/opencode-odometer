@@ -22,7 +22,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
@@ -160,7 +159,7 @@ func main() {
 		Height:           46,
 		Frameless:        true,
 		AlwaysOnTop:      true,
-		StartHidden:      false,
+		StartHidden:      true,
 		DisableResize:    true,
 		BackgroundColour: &options.RGBA{R: 11, G: 11, B: 13, A: 255},
 		CSSDragProperty:  "--wails-draggable",
@@ -175,7 +174,7 @@ func main() {
 		},
 		OnDomReady: func(ctx context.Context) {
 			logMsg("wails OnDomReady triggered - showing window")
-			runtime.WindowShow(ctx)
+			svc.Ready()
 		},
 		Windows: &windows.Options{
 			WebviewIsTransparent:              false,
@@ -188,7 +187,8 @@ func main() {
 			WebviewIsTransparent: false,
 			Appearance:           mac.NSAppearanceNameDarkAqua,
 		},
-		Bind: []interface{}{svc},
+		OnShutdown: func(ctx context.Context) { svc.Stop(); a.SaveState() },
+		Bind:       []interface{}{svc},
 	})
 	if err != nil {
 		logMsg("wails run failed: %v", err)

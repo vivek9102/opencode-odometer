@@ -33,8 +33,8 @@ func (a *App) SetViewMode(v string) {
 // have I spent since I last looked"), whereas the cap is a safety control.
 // Rebasing here meant pressing RESET TRIP silently disarmed enforcement for a
 // session that was already over its limit, so a runaway session could be freed
-// by a button that appears to be about the display only. Use Rebase explicitly
-// (as changing the limit does) when the cap really should restart.
+// by a button that appears to be about the display only. Turning the limit
+// off and back on explicitly starts a new counting period.
 func (a *App) ResetTrip() {
 	a.Ledger.ResetTrip()
 	a.ResetRateWindow()
@@ -137,13 +137,12 @@ func (a *App) SetMode(m string) {
 	a.SaveState()
 }
 
-// SetLimit sets the per-session spend limit in dollars and republishes.
+// SetLimit changes the cap without clearing the spend already counted.
 func (a *App) SetLimit(f float64) {
 	if f < 0 {
 		f = 0
 	}
 	a.Budget.Cfg.SessionLimitUSD = round4(f)
-	a.Rebase(false)
 	a.PublishBudget()
 	a.SaveState()
 }
@@ -156,6 +155,9 @@ func (a *App) SetLimit(f float64) {
 // next tick is a genuinely clean slate rather than a resumption of an old
 // tally.
 func (a *App) SetEnabled(on bool) {
+	if a.Budget.Enabled() == on {
+		return
+	}
 	a.Budget.Cfg.Enabled = on
 	if on {
 		a.Rebase(true)

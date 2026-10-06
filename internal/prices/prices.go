@@ -299,7 +299,7 @@ func (b *Book) entryLocked(key string) Rate {
 	}
 
 	// 3. A free marker on the actual model key must win before fuzzy matching.
-	// Otherwise a key such as "companyhub/deepseek-v4-flash-sovereign" is
+	// Otherwise a key such as "custom/deepseek-v4-flash-sovereign" is
 	// incorrectly assigned the paid rate for "opencode/deepseek-v4-flash".
 	if LooksFree(key) {
 		return Rate{

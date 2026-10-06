@@ -22,6 +22,7 @@ func (a *App) SyncHistory(isInitialSeed bool) (int, error) {
 	}
 	synced := 0
 	for _, s := range sessions {
+		a.SetSessionParent(s.ID, s.ParentID)
 		lastUpdated := s.Time.Updated
 		if lastUpdated == 0 {
 			lastUpdated = s.Time.Created
@@ -220,6 +221,9 @@ func (a *App) SyncRecent() (int, error) {
 	synced := 0
 	anyChanged := false
 	for _, s := range sessions {
+		if a.SetSessionParent(s.ID, s.ParentID) {
+			anyChanged = true
+		}
 		lastUpdated := s.Time.Updated
 		if lastUpdated == 0 {
 			lastUpdated = s.Time.Created
@@ -261,6 +265,10 @@ func (a *App) SyncRecent() (int, error) {
 // Poll is a fallback that a UI can call on a timer (e.g. 1s tick) to detect
 // newly updated sessions/turns, absorb grace claims, and re-publish state.
 func (a *App) Poll() {
+	// The plugin ignores a budget older than two minutes. Keep its heartbeat
+	// fresh on every poll, including idle sessions and connected streams with
+	// no new messages, without moving any spending baselines.
+	defer a.PublishBudget()
 	// Always drain the plugin spool first: it is the only ingest path that
 	// works when OpenCode serves its API in-process (no TCP port), which is
 	// the default for the TUI.
@@ -274,12 +282,6 @@ func (a *App) Poll() {
 		if absorbed {
 			a.SaveState()
 		}
-		// Republish regardless of whether anything changed. The plugin treats
-		// a budget.json older than two minutes as a dead odometer and stops
-		// enforcing, so an idle session must still refresh the file — and the
-		// UI reads the same verdict, so a stale file also made the board
-		// disagree with reality.
-		a.PublishBudget()
 		return
 	}
 
@@ -290,7 +292,6 @@ func (a *App) Poll() {
 	}
 	absorbed, _ := a.Contract.AbsorbGraceClaims(a.graceUsed)
 	if absorbed {
-		a.PublishBudget()
 		a.SaveState()
 	}
 }

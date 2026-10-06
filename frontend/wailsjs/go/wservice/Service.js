@@ -22,12 +22,12 @@ export function ApplyPriceOverride(arg1, arg2) {
   return window['go']['wservice']['Service']['ApplyPriceOverride'](arg1, arg2);
 }
 
-export function ClearPriceOverrides() {
-  return window['go']['wservice']['Service']['ClearPriceOverrides']();
-}
-
 export function AvailableModels() {
   return window['go']['wservice']['Service']['AvailableModels']();
+}
+
+export function ClearPriceOverrides() {
+  return window['go']['wservice']['Service']['ClearPriceOverrides']();
 }
 
 export function CycleDock() {
@@ -54,12 +54,24 @@ export function ExportCsv() {
   return window['go']['wservice']['Service']['ExportCsv']();
 }
 
+export function HideToTray() {
+  return window['go']['wservice']['Service']['HideToTray']();
+}
+
 export function Minimise() {
   return window['go']['wservice']['Service']['Minimise']();
 }
 
+export function ModelSwitchStatus(arg1) {
+  return window['go']['wservice']['Service']['ModelSwitchStatus'](arg1);
+}
+
 export function PendingPriceSuggestions() {
   return window['go']['wservice']['Service']['PendingPriceSuggestions']();
+}
+
+export function Preferences() {
+  return window['go']['wservice']['Service']['Preferences']();
 }
 
 export function PreviewPrice(arg1, arg2, arg3, arg4, arg5, arg6) {
@@ -76,6 +88,10 @@ export function Quit() {
 
 export function RaiseLimit() {
   return window['go']['wservice']['Service']['RaiseLimit']();
+}
+
+export function Ready() {
+  return window['go']['wservice']['Service']['Ready']();
 }
 
 export function RefreshPrices() {
@@ -118,12 +134,24 @@ export function SetMode(arg1) {
   return window['go']['wservice']['Service']['SetMode'](arg1);
 }
 
+export function SetPeek(arg1) {
+  return window['go']['wservice']['Service']['SetPeek'](arg1);
+}
+
+export function SetPreferences(arg1) {
+  return window['go']['wservice']['Service']['SetPreferences'](arg1);
+}
+
 export function SetScreenSize(arg1, arg2) {
   return window['go']['wservice']['Service']['SetScreenSize'](arg1, arg2);
 }
 
 export function ShowAlert() {
   return window['go']['wservice']['Service']['ShowAlert']();
+}
+
+export function ShowFromTray() {
+  return window['go']['wservice']['Service']['ShowFromTray']();
 }
 
 export function SkipPrice(arg1) {
@@ -142,8 +170,24 @@ export function Stop() {
   return window['go']['wservice']['Service']['Stop']();
 }
 
+export function SwitchModel(arg1, arg2) {
+  return window['go']['wservice']['Service']['SwitchModel'](arg1, arg2);
+}
+
+export function PendingModelSwitch(arg1) {
+  return window['go']['wservice']['Service']['PendingModelSwitch'](arg1);
+}
+
+export function ClearModelSwitch(arg1) {
+  return window['go']['wservice']['Service']['ClearModelSwitch'](arg1);
+}
+
 export function ToggleDock() {
   return window['go']['wservice']['Service']['ToggleDock']();
+}
+
+export function TogglePause() {
+  return window['go']['wservice']['Service']['TogglePause']();
 }
 
 export function ToggleViewMode() {

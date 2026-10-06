@@ -15,15 +15,16 @@
       <div id="bar-model">idle</div>
     </div>
     <span id="bar-unpriced" class="bar-warn hidden" title="Some models have no price - spend is not being counted">!</span>
-    <button id="bar-expand" class="bar-btn" title="Expand">&#9650;</button>
+    <button id="bar-expand" class="bar-btn" title="Open spending details" aria-label="Open spending details">&#9650;</button>
   </div>
 
+  <span id="cost-tick" class="hidden" aria-live="polite"></span>
   <!-- ===== EXPANDED BOARD ===== -->
   <div id="board" class="view hidden">
     <!-- Fixed Header Region -->
     <div class="fixed-head-region">
       <div class="head drag">
-        <span id="bd-mode" class="mode">TRIP</span>
+        <span id="bd-mode" class="mode">TRIP</span><button id="bd-reading" class="text-btn" title="Toggle spent / remaining">spent</button>
         <span id="bd-status" class="status">saved $0.0000</span>
         <span id="bd-conn" class="conn" title="OpenCode connection">connecting</span>
         <button id="bd-collapse" class="text-btn">&#9660; collapse</button>
@@ -59,6 +60,7 @@
 
     <!-- Fixed Footer Region -->
     <div class="fixed-footer-region">
+      <div class="activity-row"><svg id="bd-spark" viewBox="0 0 260 24" role="img" aria-label="Recent spending"><polyline /></svg><span>last 10 min</span><span id="pause-status" class="hidden">Enforcement paused</span><button id="bd-settings" class="ctl">SETTINGS</button><button id="bd-hide" class="ctl">HIDE TO TRAY</button></div>
       <!-- session budget row -->
       <div class="budget-row">
         <label class="chk" title="Applies to each chat separately, not to your total spend."><input type="checkbox" id="bd-enabled" /> LIMIT PER CHAT</label>
@@ -84,7 +86,7 @@
         <button id="bd-reset" class="ctl">RESET TRIP</button>
         <button id="bd-update-prices" class="ctl" title="Download the latest catalog for future usage; history stays unchanged">UPDATE CATALOG</button>
         <button id="bd-dock" class="ctl" title="Cycle dock position (F2)">DOCK</button>
-        <button id="bd-switch" class="ctl switch" title="Show cheaper models">CHEAPER MODELS</button>
+        <button id="bd-switch" class="ctl switch" title="Show cheaper models">MODELS</button>
         <button id="bd-stop" class="ctl stop" title="Abort the active session in OpenCode">STOP SESSION</button>
         <span id="bd-estimated" class="est-note hidden"></span>
         <button id="bd-unpriced" class="ctl unpriced hidden" title="Some models have no price, so their spend is not counted"></button>
@@ -119,7 +121,7 @@
 
       <div class="advice-box">
         <div class="advice-box-label">SWITCH TO A CHEAPER MODEL</div>
-        <div class="advice-hint">Run <code>/models</code> in OpenCode and pick one of these:</div>
+        <div class="advice-hint">Switch models from your next message. Your choice stays for this chat.</div>
         <div id="advice-cheaper" class="model-list"></div>
       </div>
 
@@ -152,7 +154,7 @@
       <p class="modal-sub">
         For private gateways and providers without their own public rates, the
         best matching original-provider price is used by default—for example,
-        Anthropic's price for a CompanyHub Claude model. Rates are USD per 1M
+        Anthropic's price for a Custom provider Claude model. Rates are USD per 1M
         tokens. Saved prices can be updated or reset at any time. Changes apply
         only to new messages; recorded history never changes. If no public match
         exists, the model stays at $0 until you save a price.
@@ -166,14 +168,29 @@
     <div class="modal-backdrop"></div>
     <div class="modal-content">
       <div class="modal-header">
-        <h3>Cheaper models</h3>
+        <h3>Switch model</h3>
         <button id="modal-close" class="modal-close-btn">&times;</button>
       </div>
-      <p class="modal-sub">Ranked from your price table. Click a row to copy its id, then switch model in OpenCode.</p>
+      <p class="modal-sub">Switch from your next message. Your choice stays for this chat.</p>
+      <div class="model-tools"><input id="model-search" type="search" placeholder="Search configured models" aria-label="Search models" /><select id="model-filter" aria-label="Model price filter"><option value="cheaper">Free + cheaper</option><option value="free">Free</option><option value="all">All configured</option></select></div>
+      <p id="model-count" class="modal-sub"></p><p id="switch-status" class="modal-sub" role="status"></p>
       <div id="model-list" class="model-list"></div>
+      <div class="model-footer"><button id="model-follow" class="model-reset hidden" title="Clear this chat's saved model and use the model selected in OpenCode">Use OpenCode selection</button></div>
     </div>
   </div>
 
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-backdrop"></div><div class="modal-content settings-box">
+      <div class="modal-header"><h3>Settings</h3><button id="settings-close" class="modal-close-btn">&times;</button></div>
+      <label><input id="pref-start" type="checkbox" /> Start Odometer with OpenCode</label>
+      <p>Turning this off keeps the plugin installed for tracking and model choices. Open Odometer manually when you need it.</p>
+      <label><input id="pref-collapse" type="checkbox" /> Collapse when clicking outside</label>
+      <label><input id="pref-dim" type="checkbox" /> Quiet appearance while idle</label>
+      <label><input id="pref-pause" type="checkbox" /> Pause budget enforcement</label>
+      <p>Spend continues to count while paused. Resuming keeps the same budget period.</p>
+      <div id="settings-result" role="status"></div>
+    </div>
+  </div>
   <!-- ===== RIGHT-CLICK CONTEXT MENU ===== -->
   <div id="menu" class="ctxmenu hidden"></div>
 
@@ -184,5 +201,6 @@
   <div id="tip" class="tooltip hidden"></div>
 
   <script src="main.js"></script>
+  <script src="experience.js"></script>
 </body>
 </html>

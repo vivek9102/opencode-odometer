@@ -97,7 +97,8 @@ function clampCost(v, kind) {
 
 function renderOdometer(el, kind, snap) {
   const accent = accentFor(snap);
-  const costStr = clampCost(snap.cost, kind).toFixed(kind === "big" ? 5 : 4);
+  const reading = snap.preferences?.remaining && snap.budget_enabled && snap.limit > 0 ? Math.max(0,snap.limit - snap.session_cost) : snap.cost;
+  const costStr = clampCost(reading, kind).toFixed(kind === "big" ? 5 : 4);
   let h = odometerHTML(kind).build(costStr, accent);
   if (snap.active) h += `<span class="pulse"></span>`;
   el.innerHTML = h;
@@ -167,6 +168,7 @@ function shortSid(sid) {
 function budgetLabelText(snap) {
   if (!snap.budget_enabled) return "off";
   const pct = Math.round((snap.fraction || 0) * 100);
+  if (snap.preferences?.paused) return `paused · $${(snap.session_cost || 0).toFixed(2)} counted`;
   let s = `$${(snap.session_cost || 0).toFixed(2)} / $${(snap.limit || 0).toFixed(2)}  ${pct}%`;
   // A limit that is set but cannot block otherwise reads as armed.
   if (!snap.enforced) s += "  (warn only)";
@@ -189,11 +191,12 @@ function budgetLabelTip(snap) {
 function render(snap) {
   snapshot = snap;
   document.body.classList.toggle("compact-mode", snap.compact);
+  renderExperience(snap);
 
   // compact bar
   renderOdometer($("bar-odometer"), "bar", snap);
   const rate = snap.rate || 0;
-  $("bar-rate").textContent = "$" + rate.toFixed(2) + "/hr";
+  $("bar-rate").textContent = snap.preferences?.paused ? "PAUSED" : snap.preferences?.remaining && snap.budget_enabled ? "REMAINING" : "$" + rate.toFixed(2) + "/hr";
   $("bar-rate").style.color = rate > 5 ? "var(--red)" : rate > 0 ? "#e4e4e7" : "var(--dim)";
   $("bar-model").textContent = snap.connected ? snap.model : "offline";
   $("bar-model").style.color = snap.connected ? "var(--dim)" : "var(--amber)";
@@ -316,6 +319,7 @@ function render(snap) {
 
 // ---- view switching ----
 function setView(toBoard) {
+  cancelPeek();
   $("bar").classList.toggle("hidden", toBoard);
   $("board").classList.toggle("hidden", !toBoard);
   Svc().SetCompact(!toBoard); // also docks (compact) or centers (board)
@@ -652,9 +656,9 @@ priceModal.querySelector(".modal-backdrop").addEventListener("click", closePrice
 const modal = $("model-modal");
 const modelList = $("model-list");
 
-// OpenCode selects models by their bare name, so strip the provider prefix.
+// Strip only the provider; model IDs can themselves contain slashes.
 function bareModel(key) {
-  const i = String(key).lastIndexOf("/");
+  const i = String(key).indexOf("/");
   return i >= 0 ? String(key).slice(i + 1) : String(key);
 }
 
@@ -664,10 +668,9 @@ function providerOf(key) {
   return i > 0 ? String(key).slice(0, i) : "";
 }
 
-// Copy something the user can act on: the command that switches model.
-function copyModelCommand(m) {
-  const name = bareModel(m.key);
-  copyText("/models " + name, "Copied  /models " + name);
+// Route a choice through the plugin; budget settings stay unchanged.
+function copyModelCommand(m, sessionID) {
+  chooseModel(m, sessionID);
 }
 
 function modelRow(m, onPick) {
@@ -691,21 +694,21 @@ function modelRow(m, onPick) {
   }
   const tag = document.createElement("span");
   tag.className = "tier-tag " + (m.free ? "free" : "silver");
-  tag.textContent = m.free ? "FREE" : "CHEAPER";
+  tag.textContent = m.tier || (m.free ? "FREE" : m.unknown ? "UNKNOWN" : m.cheaper ? "CHEAPER" : "PAID");
   title.appendChild(tag);
 
   const desc = document.createElement("div");
   desc.className = "model-desc";
   desc.textContent = m.description ||
     (m.free ? "Free - no budget impact"
-            : Math.round((m.ratio || 0) * 100) + "% of current output price");
+            : Math.round((m.ratio || 0) * 100) + "% of current price at equal input/output tokens");
 
   const price = document.createElement("div");
   price.className = "model-price";
   const inC = m.input_cost !== undefined ? m.input_cost : m.input;
   const outC = m.output_cost !== undefined ? m.output_cost : m.output;
   price.textContent = m.free ? "FREE"
-    : "$" + (inC || 0).toFixed(2) + " in / $" + (outC || 0).toFixed(2) + " out  per 1M";
+    : m.unknown ? "Price unknown" : (m.estimated ? "~ " : "") + "$" + (inC || 0).toFixed(2) + " in / $" + (outC || 0).toFixed(2) + " out  per 1M";
 
   info.appendChild(title);
   info.appendChild(desc);
@@ -713,35 +716,20 @@ function modelRow(m, onPick) {
 
   const pick = document.createElement("button");
   pick.className = "model-pick-btn" + (m.free ? " free-btn" : "");
-  // Copy the OpenCode command, not a bare identifier. A model id on the
-  // clipboard leaves the user to work out what to do with it; "/models
-  // <name>" can be pasted straight into OpenCode.
-  pick.textContent = "COPY /models";
-  pick.title = "Copies: /models " + bareModel(m.key);
+  // The next request is routed through the OpenCode plugin.
+  const specialised=m.category && m.category!=="chat";
+  pick.textContent = specialised ? "SPECIALISED" : m.chat_selected ? "SELECTED" : "SWITCH MODEL";
+  pick.disabled=!!specialised;
+  pick.title = specialised ? "This model cannot run a coding chat" : "Keep using " + m.key + " in this chat, starting next message";
   pick.addEventListener("click", (e) => { e.stopPropagation(); onPick(m); });
 
   card.appendChild(info);
   card.appendChild(pick);
-  card.addEventListener("click", () => onPick(m));
+  card.title=m.key + (m.source ? " · "+m.source : "");
   return card;
 }
 
-function openModelModal() {
-  Svc().AvailableModels().then((models) => {
-    modelList.innerHTML = "";
-    if (!models || !models.length) {
-      const empty = document.createElement("div");
-      empty.className = "modal-sub";
-      empty.textContent = "No cheaper alternative found for the current model.";
-      modelList.appendChild(empty);
-    } else {
-      for (const m of models) {
-        modelList.appendChild(modelRow(m, (x) => copyModelCommand(x)));
-      }
-    }
-    modal.classList.remove("hidden");
-  });
-}
+function openModelModal() { loadModelPicker(); }
 function closeModelModal() { modal.classList.add("hidden"); }
 
 $("bd-switch").addEventListener("click", openModelModal);
@@ -827,11 +815,11 @@ function openAdvice(asWindow) {
     if (!a.cheaper || !a.cheaper.length) {
       const d = document.createElement("div");
       d.className = "modal-sub";
-      d.textContent = "(already on a cheap model)";
+      d.textContent = "No known cheaper option. Open All configured to see unknown prices.";
       ch.appendChild(d);
     } else {
       for (const m of a.cheaper) {
-        ch.appendChild(modelRow(m, (x) => copyModelCommand(x)));
+        ch.appendChild(modelRow(m, (x) => copyModelCommand(x, a.session_id)));
       }
     }
 
@@ -929,7 +917,7 @@ function checkAdvice(snap) {
   // screen should appear when you cross the limit, not when you open the app.
   if (!adviceArmed) return;
 
-  if (!snap.budget_enabled || !snap.enforced || snap.budget_state !== "over") {
+  if (!snap.budget_enabled || !snap.enforced || snap.preferences?.paused || snap.budget_state !== "over") {
     if (snap.budget_state !== "over") adviceShownFor = null;
     return;
   }
@@ -978,11 +966,13 @@ function openMenu(x, y) {
     menu.appendChild(menuItem("Reset trip", () => {
       if (confirm("Reset the trip counter?")) Svc().ResetTrip();
     }));
-    menu.appendChild(menuItem("Cheaper models", openModelModal));
+    menu.appendChild(menuItem("Switch model", openModelModal));
+    menu.appendChild(menuItem("Settings…", openSettings));
+    menu.appendChild(menuItem(snapshot?.preferences?.remaining ? "Show spent" : "Show remaining",toggleReading));
     // Opened deliberately, so show it inline rather than seizing the window.
     menu.appendChild(menuItem("Budget details\u2026", () => openAdvice(false)));
     menu.appendChild(menuSep());
-    menu.appendChild(menuItem("Minimise", () => Svc().Minimise()));
+    menu.appendChild(menuItem("Hide to tray", () => {cancelPeek();Svc().HideToTray();}));
     menu.appendChild(menuItem("Quit", () => {
       if (confirm("Quit the odometer? Spend tracking stops until you start it again."))
         Svc().Quit();
@@ -1011,6 +1001,7 @@ window.addEventListener("blur", closeMenu);
 // ---- budget warning toast (fires once per threshold) ----
 let toastWarned = false, toastOvered = false;
 function checkToast(snap) {
+  if (snap.preferences?.paused) return;
   if (!snap.budget_enabled || snap.limit <= 0) { toastWarned = toastOvered = false; return; }
   if (snap.budget_state === "over") {
     if (!toastOvered) {
@@ -1045,6 +1036,7 @@ window.addEventListener("keydown", (e) => {
     else if (!advice.classList.contains("hidden")) closeAdvice();
     else if (!priceModal.classList.contains("hidden")) closePriceModal();
     else if (!modal.classList.contains("hidden")) closeModelModal();
+    else if (!settingsModal.classList.contains("hidden")) closeSettings();
     else setView(false);
   } else if (e.key === "F2") {
     Svc().CycleDock();

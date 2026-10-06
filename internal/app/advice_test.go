@@ -62,12 +62,12 @@ func spend(a *app.App, id, sid, model string, in, out int64) {
 }
 
 // TestCheaperThanRanksRealAlternatives replaces the previous hardcoded model
-// list: suggestions must come from the actual price table, exclude models that
-// are not credible coding substitutes, and put free options first.
+// list: suggestions come from configured models and put free options first.
 func TestCheaperThanRanksRealAlternatives(t *testing.T) {
 	a := newTestApp(t)
 	spend(a, "m1", "s1", "expensive", 1000, 1000)
 
+	inventory(t, a, []app.ConfiguredModel{{Key: "acme/expensive"}, {Key: "acme/midrange"}, {Key: "acme/cheap"}, {Key: "acme/free-tier"}, {Key: "acme/text-embed"}, {Key: "acme/tiny-nano"}})
 	alts := a.CheaperThan("acme/expensive")
 	if len(alts) == 0 {
 		t.Fatal("expected cheaper alternatives")
@@ -87,13 +87,12 @@ func TestCheaperThanRanksRealAlternatives(t *testing.T) {
 	if !seen["acme/cheap"] || !seen["acme/midrange"] {
 		t.Errorf("expected cheaper paid models in %v", seen)
 	}
-	// Embedding and nano tiers are not substitutes for a coding model.
-	if seen["acme/text-embed"] || seen["acme/tiny-nano"] {
-		t.Errorf("non-substitute models must be filtered out: %v", seen)
+	// All configured options remain visible, with specialised categories.
+	if !seen["acme/text-embed"] || !seen["acme/tiny-nano"] {
+		t.Errorf("configured specialised and nano models must remain visible: %v", seen)
 	}
 
-	// Paid alternatives are ranked closest-in-capability (most expensive of
-	// the cheaper options) first, so quality does not fall off a cliff.
+	// Paid alternatives sort by comparison price, cheapest first.
 	var paid []app.Alternative
 	for _, x := range alts {
 		if !x.Free {
@@ -101,7 +100,7 @@ func TestCheaperThanRanksRealAlternatives(t *testing.T) {
 		}
 	}
 	for i := 1; i < len(paid); i++ {
-		if paid[i-1].Ratio < paid[i].Ratio {
+		if paid[i-1].Ratio > paid[i].Ratio {
 			t.Errorf("paid alternatives out of order: %v", paid)
 			break
 		}

@@ -15,9 +15,9 @@ export function AllowMoreSession(arg1:number,arg2:number):Promise<void>;
 
 export function ApplyPriceOverride(arg1:string,arg2:prices.Rate):Promise<void>;
 
-export function ClearPriceOverrides():Promise<void>;
-
 export function AvailableModels():Promise<Array<wservice.ModelOption>>;
+
+export function ClearPriceOverrides():Promise<void>;
 
 export function CycleDock():Promise<string>;
 
@@ -31,9 +31,15 @@ export function Docks():Promise<Array<string>>;
 
 export function ExportCsv():Promise<string>;
 
+export function HideToTray():Promise<void>;
+
 export function Minimise():Promise<void>;
 
+export function ModelSwitchStatus(arg1:string):Promise<app.ModelSwitch>;
+
 export function PendingPriceSuggestions():Promise<Array<prices.PriceSuggestion>>;
+
+export function Preferences():Promise<app.Preferences>;
 
 export function PreviewPrice(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number,arg6:number):Promise<app.PricePreview>;
 
@@ -42,6 +48,8 @@ export function PricesAgeHours():Promise<number>;
 export function Quit():Promise<void>;
 
 export function RaiseLimit():Promise<void>;
+
+export function Ready():Promise<void>;
 
 export function RefreshPrices():Promise<string>;
 
@@ -63,9 +71,15 @@ export function SetLimit(arg1:number):Promise<void>;
 
 export function SetMode(arg1:string):Promise<void>;
 
+export function SetPeek(arg1:boolean):Promise<void>;
+
+export function SetPreferences(arg1:app.Preferences):Promise<void>;
+
 export function SetScreenSize(arg1:number,arg2:number):Promise<void>;
 
 export function ShowAlert():Promise<void>;
+
+export function ShowFromTray():Promise<void>;
 
 export function SkipPrice(arg1:string):Promise<void>;
 
@@ -75,7 +89,15 @@ export function Start():Promise<void>;
 
 export function Stop():Promise<void>;
 
+export function SwitchModel(arg1:string,arg2:string):Promise<app.ModelSwitch>;
+
+export function PendingModelSwitch(arg1:string):Promise<app.ModelSwitch>;
+
+export function ClearModelSwitch(arg1:string):Promise<void>;
+
 export function ToggleDock():Promise<boolean>;
+
+export function TogglePause():Promise<void>;
 
 export function ToggleViewMode():Promise<void>;
 

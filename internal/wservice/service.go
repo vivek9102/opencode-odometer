@@ -33,7 +33,7 @@ type ModelRow struct {
 	Unknown bool    `json:"unknown"`
 	// Estimated marks a rate borrowed from the same model under a different
 	// provider (e.g. anthropic/claude-opus-5 used to price
-	// companyhub/claude-opus-5). The cost is a best guess, and the UI says so
+	// custom/claude-opus-5). The cost is a best guess, and the UI says so
 	// rather than presenting it as authoritative.
 	Estimated bool   `json:"estimated"`
 	Source    string `json:"source,omitempty"`
@@ -51,6 +51,12 @@ type ModelOption struct {
 	OutputCost  float64 `json:"output_cost"`
 	Free        bool    `json:"free"`
 	Description string  `json:"description"`
+	Unknown     bool    `json:"unknown"`
+	Estimated   bool    `json:"estimated"`
+	Category    string  `json:"category"`
+	Cheaper     bool    `json:"cheaper"`
+	Current     bool    `json:"current"`
+	Source      string  `json:"source"`
 }
 
 // Snapshot is the full UI state the frontend renders on each refresh.
@@ -118,10 +124,15 @@ type Snapshot struct {
 	// (events spooled from inside OpenCode).
 	Via string `json:"via"`
 
-	Dock    string     `json:"dock"`
-	Docked  bool       `json:"docked"`
-	Compact bool       `json:"compact"`
-	Rows    []ModelRow `json:"rows"`
+	Dock        string          `json:"dock"`
+	Docked      bool            `json:"docked"`
+	Compact     bool            `json:"compact"`
+	Rows        []ModelRow      `json:"rows"`
+	Preferences app.Preferences `json:"preferences"`
+	Charge      app.Charge      `json:"charge"`
+	Charges     []app.Charge    `json:"charges"`
+	Sparkline   []float64       `json:"sparkline"`
+	Peek        bool            `json:"peek"`
 }
 
 // Service is the object bound into the JS frontend.
@@ -137,6 +148,10 @@ type Service struct {
 	backoffMu  sync.Mutex
 	backoffCur time.Duration
 
+	peek             bool
+	peekPosition     [2]int
+	trayStop         func()
+	trayReady        bool
 	alertMu          sync.Mutex
 	alertActive      bool
 	alertPrevCompact bool
@@ -155,6 +170,9 @@ func New() *Service {
 
 // Stop terminates the background loops.
 func (s *Service) Stop() {
+	if s.trayStop != nil {
+		s.trayStop()
+	}
 	if s.cancel != nil {
 		s.cancel()
 	}
@@ -211,7 +229,7 @@ func (s *Service) snapshot() *Snapshot {
 	allSessions := a.Ledger.GetPerSessionSnapshot()
 	otherCost := 0.0
 	for id, st := range allSessions {
-		if id != sess.SessionID {
+		if a.ChatRoot(id) != sess.SessionID {
 			otherCost += st.Cost
 		}
 	}
@@ -300,13 +318,14 @@ func (s *Service) snapshot() *Snapshot {
 		Fraction: frac, BudgetLabel: label,
 		BudgetState: sess.State, SessionCost: sess.Cost, SessionID: sess.SessionID,
 		GraceRemaining: sess.GraceRemaining, PastHardStop: sess.PastHardStop,
-		Enforced:     a.Budget.Blocks(),
+		Enforced:     a.Budget.Blocks() && !a.Preferences().Paused,
 		SessionCount: len(allSessions), OtherCost: otherCost, WarnAt: warnAt,
 		UnpricedModels: unpricedModels, UnpricedTokens: unpricedTokens,
 		Connected: connected, ServerURL: serverURL, Via: via,
 		Link: link, IdleFor: idleFor,
 		EstimatedModels: estimated,
 		Dock:            a.Dock(), Docked: a.DockMode(), Compact: s.appCompact, Rows: rows,
+		Preferences: a.Preferences(), Charge: a.LastCharge(), Charges: a.RecentCharges(), Sparkline: a.RecentSpend(), Peek: s.peek,
 	}
 }
 
@@ -520,38 +539,39 @@ func (s *Service) SkipPrice(key string) {
 	}
 }
 
-// AvailableModels returns real cheaper substitutes for the model currently
-// driving spend, derived from the loaded price table.
-//
-// The previous implementation returned a hardcoded list of invented models and
-// invented prices, which is worse than useless: it advises a switch to
-// something that may not exist at a price that is not real.
+// AvailableModels lists configured models with explicit pricing provenance.
 func (s *Service) AvailableModels() []ModelOption {
 	if s.App == nil {
 		return []ModelOption{}
 	}
 	current := s.App.Ledger.ActiveModel()
-	alts := s.App.CheaperThan(current)
+	alts := s.App.ModelChoices(current)
 	out := make([]ModelOption, 0, len(alts))
 	for _, a := range alts {
-		price := fmt.Sprintf("%.0f%% of current output price", a.Ratio*100)
-		tier := "CHEAPER"
+		tier := "PAID"
+		desc := "Price per 1M tokens"
+		if a.Current {
+			tier = "CURRENT"
+		}
+		if a.Cheaper {
+			tier = "CHEAPER"
+			desc = fmt.Sprintf("%.0f%% of current price at equal input/output tokens", a.Ratio*100)
+		}
+		if a.Estimated {
+			desc = "Estimated · " + desc
+		}
+		if a.Unknown {
+			tier = "UNKNOWN"
+			desc = "Price unavailable; spend cannot be estimated"
+		}
 		if a.Free {
-			price = "Free - no budget impact"
 			tier = "FREE"
+			desc = "Free model"
 		}
-		// Lead with what the model is FOR. A ranked price list still leaves
-		// the user guessing whether the cheap option can do the job, which is
-		// the actual question when swapping mid-task.
-		desc := price
-		if use := bestFor(a.Key); use != "" {
-			desc = use + " - " + price
+		if a.Category != "chat" {
+			desc = a.Category + " model · cannot run a coding chat"
 		}
-		out = append(out, ModelOption{
-			Key: a.Key, Name: a.Name, Provider: a.Provider, Tier: tier,
-			InputCost: a.Input, OutputCost: a.Output,
-			Free: a.Free, Description: desc,
-		})
+		out = append(out, ModelOption{Key: a.Key, Name: a.Name, Provider: a.Provider, Tier: tier, InputCost: a.Input, OutputCost: a.Output, Free: a.Free, Description: desc, Unknown: a.Unknown, Estimated: a.Estimated, Category: a.Category, Cheaper: a.Cheaper, Current: a.Current, Source: a.Source})
 	}
 	return out
 }
@@ -629,7 +649,7 @@ func (s *Service) Advice() *AdviceInfo {
 	// Per-session volume, so the spend has context.
 	var tokens, msgs int64
 	var since string
-	if st, ok := s.App.Ledger.GetPerSessionSnapshot()[sess.SessionID]; ok {
+	if st := s.App.ChatStats(sess.SessionID); st.Msgs > 0 {
 		tokens = st.Tokens
 		msgs = st.Msgs
 		since = st.Last
@@ -658,7 +678,7 @@ func (s *Service) Advice() *AdviceInfo {
 		TotalCost: totalCost,
 		Fraction:  sess.Fraction,
 		State:     sess.State,
-		Enforced:  s.App.Budget.Blocks(),
+		Enforced:  s.App.Budget.Blocks() && !s.App.Preferences().Paused,
 		Grace:     sess.GraceRemaining,
 		Since:     since,
 	}
@@ -673,6 +693,7 @@ func (s *Service) Advice() *AdviceInfo {
 // appears in the middle of the screen demanding a decision, which is the
 // point.
 func (s *Service) ShowAlert() {
+	s.SetPeek(false)
 	if s.Ctx == nil {
 		return
 	}
@@ -724,6 +745,7 @@ func (s *Service) DismissAlert() {
 // way out is Task Manager.
 func (s *Service) Quit() {
 	if s.App != nil {
+		_ = s.App.SuppressRelaunch()
 		s.App.SaveState()
 	}
 	if s.Ctx != nil {
@@ -760,7 +782,7 @@ func (s *Service) ActiveSession() string {
 	if s.App == nil || s.App.Ledger == nil {
 		return ""
 	}
-	return s.App.Ledger.ActiveSession()
+	return s.App.ActiveChat()
 }
 
 // AbortCurrent cancels the most recently active session via the server's
@@ -832,6 +854,7 @@ func (s *Service) SetCompact(on bool) {
 		// visibly jump.
 		return
 	}
+	s.SetPeek(false)
 	s.appCompact = on
 	if s.App != nil {
 		s.App.LogEvent("SetCompact on=%v", on)
@@ -848,12 +871,8 @@ func (s *Service) SetCompact(on bool) {
 	s.refresh()
 }
 
-// UnlockSession grants the session enough headroom to continue past the cap.
-//
-// This does NOT switch the model. The odometer observes OpenCode; it has no
-// channel to change a session's model, so the picker is guidance only and
-// modelKey is recorded for the log. The method was previously named
-// SwitchSessionModel, which promised a capability that was never implemented.
+// UnlockSession is retained for older callers that grant extra headroom.
+// It does not route a model; the next-request picker uses SwitchModel.
 func (s *Service) UnlockSession(sessionID, modelKey string) error {
 	if s.App == nil {
 		return fmt.Errorf("app not initialized")
@@ -920,6 +939,9 @@ func (s *Service) applyDock() {
 		return
 	}
 	w, h := windowWidth(s.appCompact), windowHeight(s.appCompact)
+	if s.peek && s.appCompact {
+		h = peekHeight
+	}
 
 	// Prefer the OS work area: it already excludes the taskbar, whatever its
 	// height, edge or auto-hide setting. Only fall back to the raw screen size
@@ -1027,7 +1049,14 @@ func (s *Service) Start() {
 	// Restore the saved layout before positioning. The window is created at
 	// the expanded size, so without this the first paint is a centred board
 	// even when the user left it as the docked bar.
-	s.appCompact = a.Compact()
+	s.appCompact = true
+	a.SetCompact(true)
+	for _, arg := range os.Args[1:] {
+		if arg == "--autostart" {
+			a.SetDock("bottom-center")
+			break
+		}
+	}
 	a.LogEvent("layout restore compact=%v dock=%s docked=%v", s.appCompact, a.Dock(), a.DockMode())
 	if s.Ctx != nil {
 		runtime.WindowSetSize(s.Ctx,

@@ -44,7 +44,12 @@ jobs:
       # syntax slip has nothing else to catch it before it ships embedded in
       # the binary via //go:embed all:frontend/dist.
       - name: Syntax check frontend
-        run: node --check frontend/dist/main.js
+        run: |
+          node --check frontend/dist/main.js
+          node --check frontend/dist/experience.js
+          node --check plugin/event-diagnostics.js
+      - name: Plugin regression tests
+        run: node --test plugin/*.test.mjs
 
   privacy:
     runs-on: ubuntu-latest

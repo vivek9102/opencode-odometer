@@ -179,11 +179,11 @@ func TestFreeMarkerWinsBeforeCrossProviderFallback(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	r := b.Entry("companyhub/deepseek-v4-flash-sovereign")
+	r := b.Entry("custom/deepseek-v4-flash-sovereign")
 	if !r.Free || !r.Sovereign {
 		t.Fatalf("sovereign model matched a paid fallback: %+v", r)
 	}
-	if got := b.Cost("companyhub/deepseek-v4-flash-sovereign", 1_000_000, 1_000_000, 0, 0); got != 0 {
+	if got := b.Cost("custom/deepseek-v4-flash-sovereign", 1_000_000, 1_000_000, 0, 0); got != 0 {
 		t.Errorf("sovereign model cost = %v, want 0", got)
 	}
 }
@@ -266,10 +266,10 @@ func TestCrossProviderFallback(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// Companyhub proxy alias for claude-sonnet-5
-	r1 := b.Entry("companyhub/claude-sonnet-5")
+	// Custom provider proxy alias for claude-sonnet-5
+	r1 := b.Entry("custom/claude-sonnet-5")
 	if r1.Unknown {
-		t.Errorf("expected fallback match for companyhub/claude-sonnet-5, got unknown")
+		t.Errorf("expected fallback match for custom/claude-sonnet-5, got unknown")
 	}
 	if r1.Input != 2.0 || r1.Output != 10.0 {
 		t.Errorf("fallback rate mismatch: in=%v out=%v", r1.Input, r1.Output)
@@ -297,7 +297,7 @@ func TestCrossProviderFallbackIsDeterministic(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		r := b.Entry("companyhub/gpt-test")
+		r := b.Entry("custom/gpt-test")
 		if r.Source != "estimate from openai/gpt-test" || r.Input != 1 || r.Output != 10 {
 			t.Fatalf("iteration %d selected unstable fallback: %+v", i, r)
 		}
@@ -313,7 +313,7 @@ func TestEstimatedFallbackIsOfferedForConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := b.PendingSuggestions([]string{"companyhub/claude-test"})
+	got := b.PendingSuggestions([]string{"custom/claude-test"})
 	if len(got) != 1 || got[0].IsUnknown || !got[0].NeedsConfirmation || got[0].SuggestedRate.Output != 10 {
 		t.Fatalf("estimated private-provider rate should be confirmable: %+v", got)
 	}

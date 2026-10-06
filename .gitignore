@@ -7,6 +7,13 @@ odometer_state.json
 budget.json
 grace_claims.json
 grace_claims.json.*
+events.jsonl
+models-*.json
+switch-*.json
+preferences.json
+launch-suppressed.json
+*.log
+*.log.previous
 *.csv
 opencode_cost_*.csv
 
@@ -18,15 +25,20 @@ prices.*.local.json
 # ---------------------------------------------------------------------------
 # Build artefacts
 # ---------------------------------------------------------------------------
-build/bin/
-build/OpenCode_Odometer/
+/build/*
+!/build/appicon.png
+!/build/windows/
+/build/windows/*
+!/build/windows/icon.ico
+!/build/windows/info.json
+!/build/windows/wails.exe.manifest
 /dist/
 *.spec.bak
 *.exe
 
 # build/appicon.png and build/windows/* are Wails build INPUTS (icon, manifest,
 # version info), not outputs, so they must be tracked or the icon is lost.
-# Only the compiled output under build/bin is excluded, above.
+# All other build contents are local outputs, smoke data or backups.
 
 # frontend/dist is SOURCE, not a build artefact: it is the hand-written UI
 # embedded by //go:embed all:frontend/dist. A bare "dist/" rule also matched it

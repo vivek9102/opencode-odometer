@@ -43,14 +43,15 @@ type Tokens struct {
 type Record struct {
 	// Type distinguishes a normal upsert ("message") from a removal
 	// ("message.removed"), which must net the spend back out.
-	Type        string `json:"type"`
-	ID          string `json:"id"`
-	SessionID   string `json:"sessionID"`
-	Provider    string `json:"providerID"`
-	Model       string `json:"modelID"`
-	Tokens      Tokens `json:"tokens"`
+	Type        string  `json:"type"`
+	ID          string  `json:"id"`
+	SessionID   string  `json:"sessionID"`
+	ParentID    string  `json:"parentID,omitempty"`
+	Provider    string  `json:"providerID"`
+	Model       string  `json:"modelID"`
+	Tokens      Tokens  `json:"tokens"`
 	Cost        float64 `json:"cost"`
-	Finish      string `json:"finish"`
+	Finish      string  `json:"finish"`
 	TimeCreated int64   `json:"timeCreated"`
 }
 

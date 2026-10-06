@@ -1,9 +1,9 @@
 # Contributing
 
-Thanks for taking a look. This is a small, dependency-free project and intends
-to stay that way.
+OpenCode Odometer is a Go/Wails desktop app. Windows is the tested platform;
+the core packages and OpenCode plugin are portable.
 
-## Getting set up
+## Getting started
 
 ```powershell
 git clone https://github.com/vivek9102/opencode-odometer.git
@@ -11,91 +11,85 @@ cd opencode-odometer
 go run .
 ```
 
-Requires Go (see `go.mod` for the version) and the Wails v2 CLI for a full
-build (`build_exe.bat`). The old Python implementation
-(`opencode_monitor.py`) has been retired; see the README for the current
-architecture.
+Use the Go version in `go.mod` and the Wails v2 CLI for a packaged build.
+Close Odometer before running `build_exe.bat`. The script synchronizes embedded
+assets and builds the executable with the application icon.
 
-> **Note:** the rest of this document still describes the retired Python
-> implementation and is due for a rewrite. Treat the sections below as
-> historical until then.
+`frontend/dist` is hand-written source, embedded in the binary. There is no
+frontend bundler. Keep `plugin/odometer.js` identical to
+`internal/app/odometer_plugin.js`; an asset synchronization test checks this.
 
-## Running tests
+## Required checks
 
 ```powershell
-go test ./...
+go test -count=1 ./...
+go vet ./...
+go build ./...
+node --check plugin/odometer.js
+node --check plugin/event-diagnostics.js
+node --check frontend/dist/main.js
+node --check frontend/dist/experience.js
+node --test plugin/*.test.mjs
+git diff --check
 ```
 
-Tests are pure logic — no GUI, no network. Please keep them that way so they
-stay fast and runnable anywhere.
+Core tests use temporary files, mocks or local HTTP servers. They do not need
+real provider credentials or inference requests. CI runs the Go checks,
+JavaScript syntax checks, plugin regressions and tracked-data privacy checks.
 
-## Before opening a PR
+## Optional smoke checks
 
-- [ ] `go test ./...` passes
-- [ ] `go vet ./...` passes
-- [ ] `node --check plugin\odometer.js` passes
-- [ ] `node --check frontend\dist\main.js` passes
-- [ ] No private data in the diff — see below
+- `node tools/experience-ui-smoke.cjs` uses Playwright with mock Wails services.
+  Make Playwright available through `NODE_PATH` if needed; set
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to a local browser executable to override
+  Playwright's bundled Chromium.
+- Set `OPENCODE_SMOKE_EXE` to an installed OpenCode executable, then run
+  `node tools/opencode-startup-smoke.cjs` or
+  `node tools/model-switch-smoke.cjs`. These launch isolated test instances;
+  model routing uses a local fake provider, without paid inference.
+- The diagnostic benchmark requires `OPENCODE_DIAGNOSTICS_BASELINE` pointing
+  to the older synchronous logger. Run `node tools/event-diagnostics-bench.mjs`
+  with synthetic events to compare it against disabled logging and summaries.
 
-### Never commit
+Smoke outputs stay under ignored `build/` directories. `OPENCODE_SMOKE_DIR`
+overrides the real-OpenCode scripts' output directory. Do not point it at live
+OpenCode or Odometer data.
 
-`.gitignore` covers these, but check anyway:
+## Accounting and routing rules
 
-- `odometer_state.json` — every priced message, real session ids, real spend
-- `budget.json` — live per-session costs
-- `prices.local.json` — private/commercial rates
-- `*.csv` — exported ledgers
+- Price cache reads and writes separately from ordinary input and output.
+  Explicit private/free rates take precedence; provider-reported costs are
+  used only according to the accounting precedence documented in the README.
+- Messages are keyed by ID and updated as token usage arrives. Replayed history
+  must not count twice or produce new live-charge animations.
+- Parent and delegated child sessions share budget spend and grace. Changing
+  an enabled cap, resetting TRIP or restarting must preserve that period.
+- Only Odometer writes `budget.json`. The plugin reads verdicts and records
+  grace claims separately. An expired heartbeat stops enforcement.
+- Plugin initialization must return its hooks before awaiting SDK discovery.
+- A saved model choice belongs to one chat and remains until replaced or
+  cleared. Confirm it using the matching assistant response. OpenCode `/model`
+  does not automatically clear an Odometer choice; preserve the explicit
+  **Use OpenCode selection** handoff.
 
-A quick scan before pushing:
+## Keep private data out of commits
+
+Never publish runtime ledgers, budgets, event spools, inventories, switch
+requests, logs, CSV exports, private prices, credentials or personal provider
+configuration. Use generic provider names and synthetic IDs in fixtures.
+Review the staged file list and diff before pushing:
 
 ```powershell
+git diff --cached --stat
+git diff --cached --check
 git diff --cached -U0 | Select-String -Pattern "ses_[a-zA-Z0-9]{20}"
 ```
 
-## Most useful contribution: macOS / Linux support
-
-> This section describes the retired Python implementation's blockers and is
-> stale for the current Go/Wails app. Superseded pending the task 3 rewrite;
-> `internal/lock` already has a build-tagged Unix implementation
-> (`lock_unix.go`) alongside the Windows one, which is a starting point.
-
-## Design principles
-
-Worth understanding before changing enforcement or pricing:
-
-**1. `prices.json` is authoritative.** The app never trusts a provider's cost
-field and never calls a pricing API at runtime.
-
-**2. Cache tokens are priced separately.** They were ~83% of tokens on the
-traffic this was built against. Never fold them into `input`.
-
-**3. Follow `time_updated`, not `time_created`.** OpenCode inserts assistant
-rows with zero tokens and backfills usage 1.5–19s later. Watermarking on
-creation time counted 5,048 of 5,336 messages as free.
-
-**4. Messages are keyed by id; totals are recomputed.** Rows are re-read as
-they update, so an accumulator would double-count.
-
-**5. `budget.json` has exactly one writer** — the odometer. The plugin only
-reads it. Grace claims go in a separate file to preserve this.
-
-**6. `Budget.status()` is a measurement, not a decision.** It reports the true
-fraction regardless of whether enforcement is on. Gate on `blocks()` or the
-published `enforced` flag — never infer enforcement from state.
-
-**7. A dead odometer must never block anyone.** If the ledger is older than
-120s the plugin stops enforcing. Fail open, always.
-
-**8. Blocking must happen before the provider is called.** `chat.message`
-throws for this reason. `session.abort()` was tried and rejected — it cancels
-a turn already in flight, ~12s after billing has started.
+Only the icon, Windows manifest and Windows version metadata under `build/`
+are source inputs. Other build contents and smoke artifacts are ignored.
 
 ## Reporting bugs
 
-Please include:
-
-- OS and Python version
-- Whether running from source or the `.exe`
-- Relevant output from the console (the app prints `[prices]`, `[budget]`,
-  `[state]` diagnostics)
-- **Redact session ids and costs** if you paste ledger contents
+Include the OS, OpenCode version, whether using source or a packaged executable,
+reproduction steps, and a short redacted log excerpt. Redact session IDs,
+message content, costs, provider endpoints and credentials.

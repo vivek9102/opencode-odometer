@@ -60,6 +60,7 @@ func TestBreachDrivesAlertState(t *testing.T) {
 	// and does not immediately re-open.
 	a.RaiseLimit()
 	a.RaiseLimit()
+	a.RaiseLimit() // $40 covers the $30.30 already spent without resetting it.
 	if sb := a.ActiveSessionBudget(); sb.State == "over" {
 		t.Errorf("raising the limit should clear the breach, still %q", sb.State)
 	}

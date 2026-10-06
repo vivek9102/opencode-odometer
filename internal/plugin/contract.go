@@ -22,15 +22,16 @@ import (
 
 // Session is one session's published verdict.
 type Session struct {
-	Cost           float64 `json:"cost"`
-	State          string  `json:"state"`
-	Fraction       float64 `json:"fraction"`
-	Limit          float64 `json:"limit"`
-	Mode           string  `json:"mode"`
-	GraceRemaining int     `json:"grace_remaining"`
-	HardStopAt     float64 `json:"hard_stop_at"`
-	PastHardStop   bool    `json:"past_hard_stop"`
-	Enforced       bool    `json:"enforced"`
+	BudgetSessionID string  `json:"budget_session_id,omitempty"`
+	Cost            float64 `json:"cost"`
+	State           string  `json:"state"`
+	Fraction        float64 `json:"fraction"`
+	Limit           float64 `json:"limit"`
+	Mode            string  `json:"mode"`
+	GraceRemaining  int     `json:"grace_remaining"`
+	HardStopAt      float64 `json:"hard_stop_at"`
+	PastHardStop    bool    `json:"past_hard_stop"`
+	Enforced        bool    `json:"enforced"`
 }
 
 // BudgetFile is the full document written to budget.json.

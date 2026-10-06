@@ -8,11 +8,18 @@ export namespace app {
 	    output: number;
 	    free: boolean;
 	    ratio: number;
+	    unknown: boolean;
+	    estimated: boolean;
+	    source: string;
+	    category: string;
+	    current: boolean;
+	    cheaper: boolean;
+	    comparable: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new Alternative(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
@@ -22,6 +29,75 @@ export namespace app {
 	        this.output = source["output"];
 	        this.free = source["free"];
 	        this.ratio = source["ratio"];
+	        this.unknown = source["unknown"];
+	        this.estimated = source["estimated"];
+	        this.source = source["source"];
+	        this.category = source["category"];
+	        this.current = source["current"];
+	        this.cheaper = source["cheaper"];
+	        this.comparable = source["comparable"];
+	    }
+	}
+	export class Charge {
+	    sequence: number;
+	    id: string;
+	    cost: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Charge(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sequence = source["sequence"];
+	        this.id = source["id"];
+	        this.cost = source["cost"];
+	    }
+	}
+	export class ModelSwitch {
+	    id: string;
+	    session_id: string;
+	    key: string;
+	    status: string;
+	    detail: string;
+	    issued: number;
+	    message_id?: string;
+	    persistent?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new ModelSwitch(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.session_id = source["session_id"];
+	        this.key = source["key"];
+	        this.status = source["status"];
+	        this.detail = source["detail"];
+	        this.issued = source["issued"];
+	        this.message_id = source["message_id"];
+	        this.persistent = source["persistent"];
+	    }
+	}
+	export class Preferences {
+	    auto_start: boolean;
+	    auto_collapse: boolean;
+	    idle_dim: boolean;
+	    remaining: boolean;
+	    paused: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new Preferences(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.auto_start = source["auto_start"];
+	        this.auto_collapse = source["auto_collapse"];
+	        this.idle_dim = source["idle_dim"];
+	        this.remaining = source["remaining"];
+	        this.paused = source["paused"];
 	    }
 	}
 	export class PricePreview {
@@ -60,7 +136,7 @@ export namespace app {
 }
 
 export namespace prices {
-	
+
 	export class Rate {
 	    name: string;
 	    family?: string;
@@ -72,11 +148,11 @@ export namespace prices {
 	    free?: boolean;
 	    sovereign?: boolean;
 	    unknown?: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Rate(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -98,11 +174,11 @@ export namespace prices {
 	    is_unknown: boolean;
 	    is_local: boolean;
 	    needs_confirmation: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PriceSuggestion(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
@@ -112,7 +188,7 @@ export namespace prices {
 	        this.is_local = source["is_local"];
 	        this.needs_confirmation = source["needs_confirmation"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -135,7 +211,7 @@ export namespace prices {
 }
 
 export namespace wservice {
-	
+
 	export class AdviceInfo {
 	    session_id: string;
 	    cost: number;
@@ -155,11 +231,11 @@ export namespace wservice {
 	    enforced: boolean;
 	    grace_remaining: number;
 	    since: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AdviceInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.session_id = source["session_id"];
@@ -181,7 +257,7 @@ export namespace wservice {
 	        this.grace_remaining = source["grace_remaining"];
 	        this.since = source["since"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -209,11 +285,17 @@ export namespace wservice {
 	    output_cost: number;
 	    free: boolean;
 	    description: string;
-	
+	    unknown: boolean;
+	    estimated: boolean;
+	    category: string;
+	    cheaper: boolean;
+	    current: boolean;
+	    source: string;
+
 	    static createFrom(source: any = {}) {
 	        return new ModelOption(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
@@ -224,6 +306,12 @@ export namespace wservice {
 	        this.output_cost = source["output_cost"];
 	        this.free = source["free"];
 	        this.description = source["description"];
+	        this.unknown = source["unknown"];
+	        this.estimated = source["estimated"];
+	        this.category = source["category"];
+	        this.cheaper = source["cheaper"];
+	        this.current = source["current"];
+	        this.source = source["source"];
 	    }
 	}
 	export class ModelRow {
@@ -238,11 +326,11 @@ export namespace wservice {
 	    unknown: boolean;
 	    estimated: boolean;
 	    source?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ModelRow(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.key = source["key"];
@@ -297,11 +385,16 @@ export namespace wservice {
 	    docked: boolean;
 	    compact: boolean;
 	    rows: ModelRow[];
-	
+	    preferences: app.Preferences;
+	    charge: app.Charge;
+	    charges: app.Charge[];
+	    sparkline: number[];
+	    peek: boolean;
+
 	    static createFrom(source: any = {}) {
 	        return new Snapshot(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.view = source["view"];
@@ -342,8 +435,13 @@ export namespace wservice {
 	        this.docked = source["docked"];
 	        this.compact = source["compact"];
 	        this.rows = this.convertValues(source["rows"], ModelRow);
+	        this.preferences = this.convertValues(source["preferences"], app.Preferences);
+	        this.charge = this.convertValues(source["charge"], app.Charge);
+	        this.charges = this.convertValues(source["charges"], app.Charge);
+	        this.sparkline = source["sparkline"];
+	        this.peek = source["peek"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;

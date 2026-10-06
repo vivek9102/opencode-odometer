@@ -112,17 +112,17 @@ func TestOverrideKeepsHistoryReplayStableAndPricesFutureMessages(t *testing.T) {
 	a, _, _ := newTestApp(t)
 	a.cfg.OverlayFile = filepath.Join(t.TempDir(), "prices.local.json")
 
-	old := asst("old", "s1", "companyhub", "sonnet", 0)
+	old := asst("old", "s1", "custom", "sonnet", 0)
 	if !a.ApplyMessage(old) {
 		t.Fatal("expected first message to enter ledger")
 	}
 	before := a.Ledger.TotalCost
 
 	newRate := prices.Rate{
-		Name: "CompanyHub Sonnet", Family: "", Input: 6, Output: 30,
+		Name: "Custom provider Sonnet", Family: "", Input: 6, Output: 30,
 		CacheRead: 0.6, CacheWrite: 7.5,
 	}
-	if err := a.SaveOverride("companyhub/sonnet", newRate); err != nil {
+	if err := a.SaveOverride("custom/sonnet", newRate); err != nil {
 		t.Fatal(err)
 	}
 	if a.Ledger.TotalCost != before {
@@ -138,7 +138,7 @@ func TestOverrideKeepsHistoryReplayStableAndPricesFutureMessages(t *testing.T) {
 		t.Fatalf("historical replay changed total: before=%v after=%v", before, a.Ledger.TotalCost)
 	}
 
-	if !a.ApplyMessage(asst("new", "s1", "companyhub", "sonnet", 0)) {
+	if !a.ApplyMessage(asst("new", "s1", "custom", "sonnet", 0)) {
 		t.Fatal("expected future message to enter ledger")
 	}
 	if got := a.Ledger.Messages["new"].Cost; got <= before {
@@ -149,10 +149,10 @@ func TestOverrideKeepsHistoryReplayStableAndPricesFutureMessages(t *testing.T) {
 func TestLocalFreeOverrideDoesNotReclassifyHistory(t *testing.T) {
 	a, _, _ := newTestApp(t)
 	a.cfg.OverlayFile = filepath.Join(t.TempDir(), "prices.local.json")
-	a.ApplyMessage(asst("old", "s1", "companyhub", "sonnet", 0))
+	a.ApplyMessage(asst("old", "s1", "custom", "sonnet", 0))
 	before := a.Ledger.Messages["old"]
 
-	if err := a.SaveOverride("companyhub/sonnet", prices.Rate{Name: "Sonnet", Free: true}); err != nil {
+	if err := a.SaveOverride("custom/sonnet", prices.Rate{Name: "Sonnet", Free: true}); err != nil {
 		t.Fatal(err)
 	}
 	a.reclassifyFreeModels()
@@ -165,10 +165,10 @@ func TestClearPriceOverridesKeepsHistoryAndRestoresFutureDefault(t *testing.T) {
 	a, _, _ := newTestApp(t)
 	a.cfg.OverlayFile = filepath.Join(t.TempDir(), "prices.local.json")
 	override := prices.Rate{Name: "Sonnet", Input: 30, Output: 150, CacheRead: 3, CacheWrite: 37.5}
-	if err := a.SaveOverride("companyhub/sonnet", override); err != nil {
+	if err := a.SaveOverride("custom/sonnet", override); err != nil {
 		t.Fatal(err)
 	}
-	a.ApplyMessage(asst("custom", "s1", "companyhub", "sonnet", 0))
+	a.ApplyMessage(asst("custom", "s1", "custom", "sonnet", 0))
 	customCost := a.Ledger.TotalCost
 
 	if err := a.ClearPriceOverrides(); err != nil {
@@ -177,7 +177,7 @@ func TestClearPriceOverridesKeepsHistoryAndRestoresFutureDefault(t *testing.T) {
 	if a.Ledger.TotalCost != customCost {
 		t.Fatalf("reset rewrote historical custom spend: before=%v after=%v", customCost, a.Ledger.TotalCost)
 	}
-	a.ApplyMessage(asst("default", "s1", "companyhub", "sonnet", 0))
+	a.ApplyMessage(asst("default", "s1", "custom", "sonnet", 0))
 	if got := a.Ledger.Messages["default"].Cost; got >= customCost {
 		t.Fatalf("future message did not return to lower catalog estimate: default=%v custom=%v", got, customCost)
 	}
@@ -186,7 +186,7 @@ func TestClearPriceOverridesKeepsHistoryAndRestoresFutureDefault(t *testing.T) {
 func TestReclassifyFreeModelsDoesNotRepricePaidHistory(t *testing.T) {
 	a, _, _ := newTestApp(t)
 	a.Ledger.Put(ledger.Record{
-		MID: "free", Provider: "companyhub", Model: "deepseek-v4-flash-sovereign",
+		MID: "free", Provider: "custom", Model: "deepseek-v4-flash-sovereign",
 		TokensIn: 1_000_000, TokensOut: 1_000_000, Cost: 99,
 	})
 	a.Ledger.Put(ledger.Record{

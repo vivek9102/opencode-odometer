@@ -382,7 +382,7 @@ func (s *Store) ActiveSession() string {
 
 	var best, bestLast string
 	for sid, st := range s.PerSession {
-		if best == "" || st.Last > bestLast {
+		if best == "" || st.Last > bestLast || (st.Last == bestLast && sid > best) {
 			bestLast = st.Last
 			best = sid
 		}

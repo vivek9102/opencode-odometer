@@ -57,6 +57,10 @@ func (a *App) DrainSpool() int {
 
 	changed := 0
 	for _, rec := range recs {
+		if rec.Type == "session" {
+			if a.SetSessionParent(rec.ID, rec.ParentID) { changed++ }
+			continue
+		}
 		if rec.Type == "message.removed" {
 			// A retry/undo must net its spend back out.
 			if _, removed := a.Ledger.Remove(rec.ID); removed {
