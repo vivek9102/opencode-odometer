@@ -41,8 +41,14 @@ they return token usage. Odometer can price that usage locally. See
 ## Features
 
 - Starts as a compact bar; OpenCode auto-launch docks it bottom-centre above the taskbar.
+  The widget stays on top when you switch windows; Hide to tray hides it explicitly.
 - **Settings** has Start with OpenCode, idle dimming, optional outside-click collapse,
   and enforcement pause. Pausing keeps counting spend and resumes the same budget period.
+  Settings and Hide to tray sit together at the bottom-right of the board.
+  A single Review prices button opens estimated and unknown pricing details.
+- **Stop Session** cancels the active chat and its delegated work with one click,
+  and waits for OpenCode's acknowledgement. Other chats keep running. Restart
+  OpenCode after a plugin update to activate this control.
 - Click the expand arrow for spending details and a ten-minute spending sparkline.
   Switch the readout between spent and remaining. Hover keeps the window still.
 - A chat's delegated child sessions share its spending cap and grace allowance.
@@ -214,8 +220,8 @@ share the parent cap and grace allowance.
 | Mode | Behaviour |
 |---|---|
 | `warn` | Never blocks. Toast only. |
-| `soft` *(default)* | Blocks at 100%, grants **one grace turn**, hard stop at 1.5×. |
-| `hard` | Blocks at 100% immediately, no grace. |
+| `soft` *(default)* | Blocks paid turns at 100%, grants **one grace turn**, hard stop at 1.5×. |
+| `hard` | Blocks paid turns at 100% immediately, no grace. |
 
 Colours: green → amber (80%) → **orange** (over, still recoverable) → red (past
 hard stop). Orange versus red is the useful distinction — whether raising the
@@ -230,6 +236,12 @@ Enabling a limit starts a new spending period. Changing an enabled limit,
 resetting TRIP, pausing enforcement, or restarting Odometer preserves that
 period's spend and grace usage. Pause keeps recording costs; resume enforces
 the existing cap.
+
+At the limit, choose a model labelled **FREE** to continue without disabling
+the cap. Free turns and their tools use no grace; the existing spend stays
+visible. Switching back to a paid model respects the exhausted limit, including
+paid delegated work. Unknown prices do not qualify as free. The plugin uses
+Odometer's pricing classification rather than treating zero SDK rates as free.
 
 ## Switching models
 

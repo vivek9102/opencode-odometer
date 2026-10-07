@@ -19,9 +19,11 @@ const {join}=require('node:path');
   window.testModels=Array.from({length:54},(_,i)=>({key:'custom/model-'+i+(i<12?'-free':''),name:'Model '+i,provider:'custom',free:i<12,cheaper:i<40,category:i===53?'embedding':'chat',unknown:i===52,input_cost:1,output_cost:2}));
   window.go={wservice:{Service:{
    Snapshot:async()=>({...testSnap}),SetScreenSize:async()=>{},SetCompact:async v=>{testSnap.compact=v;testSnap.peek=false;emit()},SetPeek:async v=>{testSnap.peek=v;emit()},
-   SetPreferences:async p=>{testSnap.preferences=p;emit()},UnpricedModels:async()=>[],PendingPrices:async()=>[],PricesAgeHours:async()=>0,
+   SetPreferences:async p=>{testSnap.preferences=p;emit()},UnpricedModels:async()=>[],PendingPrices:async()=>[],PendingPriceSuggestions:async()=>Array.from({length:7},(_,i)=>({key:'custom/price-'+i,needs_confirmation:true,source:'estimate from acme/model',suggested_rate:{input:1,output:2}})),PricesAgeHours:async()=>0,
    AvailableModels:async()=>testModels,PendingModelSwitch:async sid=>window.testSwitch?.session_id===sid ? testSwitch : {},ClearModelSwitch:async()=>{window.testSwitch=null},SwitchModel:async(key,sid)=>{window.testSwitch={id:'req1',key,session_id:sid,persistent:true,issued:Date.now()/1000,status:'queued',detail:'Ready for next request'};return testSwitch},ModelSwitchStatus:async()=>testSwitch,
    Advice:async()=>({session_id:testSnap.session_id,limit:1,cost:1.1,rate:.2,tokens:1000,msgs:2,drivers:[{key:'custom/default',output:1.1}],cheaper:testModels.slice(0,2)}),ShowAlert:async()=>{},
+   AbortCurrent:()=>{window.stopCalls=(window.stopCalls||0)+1;return new Promise((resolve,reject)=>{window.finishStop=resolve;window.failStop=reject})},
+   DismissAlert:async()=>{},
   }}};
  });
  try {
@@ -32,6 +34,14 @@ const {join}=require('node:path');
   assert.equal(await page.evaluate(()=>testSnap.compact),true,'hover must not resize the compact window');
   assert.equal(await page.locator('#hover-peek').count(),0);
   await page.locator('#bar-expand').click();await page.setViewportSize({width:620,height:580});
+  await page.locator('#bd-unpriced').waitFor({state:'visible'});
+  await page.evaluate(()=>{testSnap.estimated_models=7;render(testSnap)});
+  assert.equal(await page.locator('#bd-unpriced').innerText(),'REVIEW 7 PRICES');
+  assert.equal(await page.locator('#bd-estimated').isVisible(),false,'estimated count is duplicated on the dashboard');
+  const settingsBox=await page.locator('#bd-settings').boundingBox(),hideBox=await page.locator('#bd-hide').boundingBox();
+  assert.equal(settingsBox.y,hideBox.y);assert.ok(settingsBox.y+settingsBox.height<=580 && hideBox.x+hideBox.width<=620,'bottom utility controls are clipped');
+  await page.screenshot({path:join(__dirname,'../build/footer-ui-2.1.2.png')});
+  await page.locator('#bd-unpriced').click();assert.ok(await page.locator('#bd-estimated').isVisible());await page.locator('#price-close').click();
   await page.locator('#bd-reading').click();assert.equal(await page.locator('#bd-reading').innerText(),'remaining');
   await page.locator('#bd-switch').click();
   await page.locator('#model-modal').waitFor({state:'visible'});
@@ -60,13 +70,41 @@ const {join}=require('node:path');
   await page.locator('#modal-close').click();await page.locator('#bd-settings').click();await page.locator('#pref-start').uncheck();
   assert.equal(await page.evaluate(()=>testSnap.preferences.auto_start),false);assert.equal(await page.evaluate(()=>testSnap.session_cost),.3);
   await page.locator('#settings-close').click();
+  await page.evaluate(()=>{window.testFocus=false;document.hasFocus=()=>testFocus;document.activeElement?.blur();window.dispatchEvent(new Event('blur'))});
+  await page.waitForTimeout(350);
+  assert.equal(await page.evaluate(()=>testSnap.compact),false,'outside-click collapsed with the preference disabled');
+  await page.evaluate(()=>{testSnap.preferences.auto_collapse=true;window.dispatchEvent(new Event('blur'));setTimeout(()=>savePreferences({...testSnap.preferences,auto_collapse:false}),50)});
+  await page.waitForTimeout(350);
+  assert.equal(await page.evaluate(()=>testSnap.compact),false,'a pending blur ignored disabling the preference');
+  await page.evaluate(()=>{testSnap.preferences.auto_collapse=true;window.dispatchEvent(new Event('blur'));setTimeout(()=>{testFocus=true;window.dispatchEvent(new Event('focus'))},50)});
+  await page.waitForTimeout(350);
+  assert.equal(await page.evaluate(()=>testSnap.compact),false,'returning focus did not cancel pending collapse');
+  await page.evaluate(()=>{testFocus=false;window.dispatchEvent(new Event('blur'))});
+  await page.waitForFunction(()=>testSnap.compact);
+  await page.evaluate(()=>{testFocus=true;testSnap.preferences.auto_collapse=false;setView(true)});
+  await page.locator('#bd-stop').click();
+  assert.equal(await page.evaluate(()=>stopCalls),1,'Stop required another click or a confirmation dialog');
+  assert.ok(await page.locator('#bd-stop').isDisabled());
+  await page.evaluate(()=>document.getElementById('bd-stop').click());
+  assert.equal(await page.evaluate(()=>stopCalls),1,'repeated Stop clicks queued duplicates');
+  await page.evaluate(()=>finishStop());
+  await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('OpenCode stopped'));
+  assert.ok(!await page.locator('#bd-stop').isDisabled());
   await page.evaluate(()=>{testSnap.budget_state='warn';testSnap.fraction=.85;render(testSnap)});
   assert.ok(!await page.locator('body').evaluate(e=>e.classList.contains('quiet-idle')),'warning was dimmed');
   await page.evaluate(()=>{testSnap.budget_state='over';testSnap.session_cost=1.1;testSnap.fraction=1.1;render(testSnap);openAdvice(true)});
   await page.locator('#advice-cheaper button').first().waitFor({state:'visible'});
   assert.equal(await page.locator('#advice-cheaper button').first().innerText(),'SWITCH MODEL');
   await page.screenshot({path:join(__dirname,'../build/budget-ui-cleanup.png')});
+  await page.locator('#advice-stop').click();
+  await page.evaluate(()=>failStop('OpenCode rejected cancellation'));
+  await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('Stop failed'));
+  assert.ok(await page.locator('#advice').isVisible(),'failed stop dismissed the budget dialog');
+  await page.locator('#advice-cheaper button').first().click();
+  await page.waitForFunction(()=>document.getElementById('advice').classList.contains('hidden'));
+  assert.equal(await page.evaluate(()=>testSnap.budget_enabled),true);assert.equal(await page.evaluate(()=>testSnap.session_cost),1.1);
+  assert.ok((await page.locator('#toast').innerText()).includes('limit stays on'));
   assert.deepEqual(errors,[]);
-  console.log('Frontend smoke passed: stable hover, click details, remaining, 54 models, filters/search, confirmation, preferences and warning visibility.');
+  console.log('Frontend smoke passed: model/budget UI, single-click Stop with acknowledgement/failure, and optional outside-click collapse.');
  }finally{await browser.close();await new Promise(r=>server.close(r));}
 })().catch(e=>{console.error(e);process.exit(1)});

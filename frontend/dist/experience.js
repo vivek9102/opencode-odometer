@@ -40,7 +40,7 @@ function showCharge() {
 // native window, so its hit area and position remain stable.
 function cancelPeek() {if(snapshot?.peek)Svc().SetPeek(false);}
 $("bd-reading").addEventListener("click",toggleReading);
-async function savePreferences(p) {await Svc().SetPreferences(p);if(snapshot)snapshot.preferences=p;}
+async function savePreferences(p) {await Svc().SetPreferences(p);if(snapshot)snapshot.preferences=p;if(!p.auto_collapse)cancelCollapse();}
 async function toggleReading() {
   if(!snapshot?.budget_enabled || !(snapshot.limit>0)){toast("Set a chat limit to show remaining spend","warn");return;}
   const p={...snapshot.preferences,remaining:!snapshot.preferences?.remaining};
@@ -65,10 +65,15 @@ for(const id of ["pref-start","pref-collapse","pref-dim","pref-pause"])$(id).add
   const p={...snapshot?.preferences,auto_start:$("pref-start").checked,auto_collapse:$("pref-collapse").checked,idle_dim:$("pref-dim").checked,paused:$("pref-pause").checked};
   try{await savePreferences(p);$("settings-result").textContent="Saved";}catch(e){$("settings-result").textContent="Could not save: "+e;}
 });
+let collapseTimer=null;
+function cancelCollapse(){clearTimeout(collapseTimer);collapseTimer=null;}
+function canAutoCollapse(){return snapshot?.preferences?.auto_collapse && !snapshot.compact && !adviceOpen && !document.activeElement?.matches("input,select,textarea") && !document.querySelector(".modal:not(.hidden)");}
+window.addEventListener("focus",cancelCollapse);
 window.addEventListener("blur",()=>{
   cancelPeek();
-  if(!snapshot?.preferences?.auto_collapse || snapshot.compact || adviceOpen || document.activeElement?.matches("input,select,textarea") || document.querySelector(".modal:not(.hidden)"))return;
-  setTimeout(()=>{if(!document.hasFocus() && !document.querySelector(".modal:not(.hidden)"))setView(false);},250);
+  cancelCollapse();
+  if(!canAutoCollapse())return;
+  collapseTimer=setTimeout(()=>{collapseTimer=null;if(!document.hasFocus() && canAutoCollapse())setView(false);},250);
 });
 
 let availableModels=[],modelTargetSession="",choosingModel=false;
@@ -109,8 +114,8 @@ async function chooseModel(m,targetSession=modelTargetSession) {
   if(choosingModel || (m.category && m.category!=="chat"))return;
   if(!targetSession){toast("Send a message in the intended OpenCode chat first","warn");return;}
   choosingModel=true;
-  try {switchRequest=await Svc().SwitchModel(m.key,targetSession);showModelSwitchSummary(switchRequest);paintModels();toast("Model selected: "+modelDisplayName(m.key),"ok");}
-  catch(e){switchRequest=null;toast(String(e),"over");const pending=await Svc().PendingModelSwitch(targetSession).catch(()=>null);$("switch-status").textContent=String(e)+(pending?.id ? " · Still saved: "+pending.key : "");}
+  try {switchRequest=await Svc().SwitchModel(m.key,targetSession);showModelSwitchSummary(switchRequest);paintModels();toast("Model selected: "+modelDisplayName(m.key),"ok");return true;}
+  catch(e){switchRequest=null;toast(String(e),"over");const pending=await Svc().PendingModelSwitch(targetSession).catch(()=>null);$("switch-status").textContent=String(e)+(pending?.id ? " · Still saved: "+pending.key : "");return false;}
   finally{choosingModel=false;}
 }
 async function renderSwitchStatus() {

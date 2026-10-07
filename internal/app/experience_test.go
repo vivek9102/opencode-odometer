@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/vivek9102/opencode-odometer/internal/app"
+	"github.com/vivek9102/opencode-odometer/internal/plugin"
+	"github.com/vivek9102/opencode-odometer/internal/prices"
 )
 
 func inventory(t *testing.T, a *app.App, models []app.ConfiguredModel) {
@@ -16,6 +18,42 @@ func inventory(t *testing.T, a *app.App, models []app.ConfiguredModel) {
 	b, _ := json.Marshal(app.ModelInventory{Models: models})
 	if err := os.WriteFile(filepath.Join(filepath.Dir(a.Contract.BudgetFile), "models.json"), b, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBudgetPublishesConfirmedFreeModelsWithoutResettingSpend(t *testing.T) {
+	a := newTestApp(t)
+	a.SetSeeded(true)
+	a.SetLimit(1)
+	a.SetEnabled(true)
+	spend(a, "paid", "root", "expensive", 1000000, 1000000)
+	before := a.ActiveSessionBudget().Cost
+	inventory(t, a, []app.ConfiguredModel{{Key: "custom/free-tier", Category: "chat"}, {Key: "custom/unpriced", Category: "chat", Rate: &app.ModelPrice{}}, {Key: "custom/embedding-free", Category: "embedding"}, {Key: "acme/expensive", Category: "chat"}})
+	a.PublishBudget()
+	read := func() plugin.BudgetFile {
+		var doc plugin.BudgetFile
+		b, err := os.ReadFile(a.Contract.BudgetFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(b, &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	doc := read()
+	if len(doc.FreeModels) != 1 || doc.FreeModels[0] != "custom/free-tier" {
+		t.Fatalf("wrong free exemptions: %v", doc.FreeModels)
+	}
+	if !doc.Enabled || doc.Sessions["root"].Cost != before || doc.Sessions["root"].Limit != 1 {
+		t.Fatalf("budget was reset: %+v", doc)
+	}
+	if err := a.SaveOverride("custom/free-tier", prices.Rate{Input: 1, Output: 2}); err != nil {
+		t.Fatal(err)
+	}
+	a.PublishBudget()
+	if got := read().FreeModels; len(got) != 0 {
+		t.Fatalf("paid local override was exempted: %v", got)
 	}
 }
 

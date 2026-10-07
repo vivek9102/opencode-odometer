@@ -300,12 +300,11 @@ function render(snap) {
     tb.appendChild(tr);
   }
 
-  // One quiet line rather than a prompt per model: estimated rates are
-  // usually correct (same model, different provider), so this is information,
-  // not a task.
+  // Keep pricing details inside the review screen; each estimated table
+  // amount still carries its ~ marker.
   const est = $("bd-estimated");
   if (snap.estimated_models > 0) {
-    est.textContent = `~ ${snap.estimated_models} estimated`;
+    est.textContent = `${snap.estimated_models} model${snap.estimated_models===1 ? " uses" : "s use"} estimated rates. Estimated amounts are marked ~ in the spending table.`;
     est.title = "Priced from the same model under another provider. " +
       "Hover a ~ row for its source, or set exact rates in prices.local.json.";
     est.classList.remove("hidden");
@@ -398,20 +397,17 @@ $("bd-dock").addEventListener("click", () => {
   if (p && p.then) p.then((d) => toast("Dock: " + d, "ok"));
 });
 
-$("bd-stop").addEventListener("click", () => {
-  // Name the session: with several tabs open, "the current session" is
-  // ambiguous and this action is not reversible.
-  const sid = snapshot ? shortSid(snapshot.session_id) : "";
-  const others = snapshot ? (snapshot.session_count || 1) - 1 : 0;
-  let msg = sid
-    ? `Abort the active session (${sid}) in OpenCode?`
-    : "Abort the current session in OpenCode?";
-  if (others > 0) msg += `\n\n${others} other session${others > 1 ? "s" : ""} will keep running.`;
-  if (!confirm(msg)) return;
-  Svc().AbortCurrent()
-    .then(() => toast("Abort requested", "ok"))
-    .catch((err) => toast("Abort failed: " + err, "over"));
-});
+let stoppingSession=false;
+async function stopSession(fromAdvice=false) {
+  if(stoppingSession)return;
+  stoppingSession=true;
+  $("bd-stop").disabled=$("advice-stop").disabled=true;
+  toast("Stopping active chat…","warn");
+  try {await Svc().AbortCurrent();if(fromAdvice)closeAdvice();toast("OpenCode stopped the chat","ok");}
+  catch(err){toast("Stop failed: "+err,"over");}
+  finally{stoppingSession=false;$("bd-stop").disabled=$("advice-stop").disabled=false;}
+}
+$("bd-stop").addEventListener("click",()=>stopSession());
 $("bd-export").addEventListener("click", () => {
   const p = Svc().ExportCsv();
   if (p && p.then) p.then((r) => toast(String(r).startsWith("error:") ? r : "Exported: " + r,
@@ -433,8 +429,8 @@ function refreshUnpriced() {
     const btn = $("bd-unpriced");
     btn.classList.toggle("hidden", prices.length === 0);
     btn.textContent = n > 0
-      ? (n === 1 ? "1 CUSTOM PRICE TO REVIEW" : n + " CUSTOM PRICES TO REVIEW")
-      : "CUSTOM PROVIDER PRICES";
+      ? "REVIEW " + n + " PRICE" + (n===1 ? "" : "S")
+      : "MODEL PRICES";
   }).catch(() => { /* backend not ready */ });
 }
 
@@ -669,8 +665,10 @@ function providerOf(key) {
 }
 
 // Route a choice through the plugin; budget settings stay unchanged.
-function copyModelCommand(m, sessionID) {
-  chooseModel(m, sessionID);
+async function copyModelCommand(m, sessionID) {
+  if(!await chooseModel(m, sessionID))return;
+  if(m.free){closeAdvice();toast("Free model selected. Continue in OpenCode; your limit stays on.","ok");}
+  else if(snapshot?.budget_state==="over" && snapshot?.enforced)toast("Paid model selected. Increase the limit to continue.","warn");
 }
 
 function modelRow(m, onPick) {
@@ -781,7 +779,7 @@ function openAdvice(asWindow) {
       (!over
         ? "Nothing is blocked yet."
         : snapshot && snapshot.enforced
-        ? "New turns are blocked until you choose below."
+        ? "Paid turns are blocked. Choose a free model to continue, or increase the limit."
         : "Enforcement is off, so nothing is being blocked.");
 
     const dv = $("advice-drivers");
@@ -896,12 +894,7 @@ $("advice-double").addEventListener("click", () => {
   closeAdvice();
   toast("Limit doubled", "ok");
 });
-$("advice-stop").addEventListener("click", () => {
-  if (!confirm("Abort the current session in OpenCode?")) return;
-  Svc().AbortCurrent()
-    .then(() => { closeAdvice(); toast("Abort requested", "ok"); })
-    .catch((err) => toast("Abort failed: " + err, "over"));
-});
+$("advice-stop").addEventListener("click",()=>stopSession(true));
 $("advice-disable").addEventListener("click", () => {
   Svc().SetEnabled(false);
   closeAdvice();

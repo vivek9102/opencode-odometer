@@ -352,11 +352,11 @@ func budgetLabel(a *app.App, sess app.SessionBudget) string {
 		case !a.Budget.Blocks():
 			suffix = "  (warn only)"
 		case sess.PastHardStop:
-			suffix = "  HARD STOP"
+			suffix = "  paid blocked"
 		case sess.GraceRemaining > 0:
 			suffix = fmt.Sprintf("  +%d grace", sess.GraceRemaining)
 		default:
-			suffix = "  BLOCKED"
+			suffix = "  paid blocked"
 		}
 	}
 	return fmt.Sprintf("$%.3f / $%g  %.0f%%%s",
@@ -729,8 +729,8 @@ func (s *Service) DismissAlert() {
 	prev := s.alertPrevCompact
 	s.alertMu.Unlock()
 
-	// The compact bar is always-on-top by design; the board is not.
-	runtime.WindowSetAlwaysOnTop(s.Ctx, prev)
+	// Restoring a layout must not remove the widget's topmost flag.
+	runtime.WindowSetAlwaysOnTop(s.Ctx, true)
 	s.appCompact = prev
 	if s.App != nil {
 		s.App.SetCompact(prev)
@@ -813,7 +813,7 @@ func (s *Service) AbortCurrent() error {
 	// port to call, but the plugin holds a live OpenCode client and can abort
 	// on our behalf.
 	s.App.LogEvent("abort via plugin session=%s", sid)
-	if err := s.App.Contract.RequestAbort(sid); err != nil {
+	if err := s.App.RequestChatAbort(sid); err != nil {
 		s.App.LogEvent("abort request failed session=%s err=%v", sid, err)
 		return fmt.Errorf("could not reach OpenCode to abort: %w", err)
 	}
@@ -848,6 +848,9 @@ func (s *Service) AllowMoreSession(cost, limit float64) error {
 
 // SetCompact toggles compact vs expanded UI layout and resizes the window.
 func (s *Service) SetCompact(on bool) {
+	if s.Ctx != nil {
+		runtime.WindowSetAlwaysOnTop(s.Ctx, true)
+	}
 	if s.appCompact == on {
 		// Nothing to do. The frontend re-asserts the current layout on every
 		// init, and repeating the resize/reposition work makes the window

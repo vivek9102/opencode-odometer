@@ -10,6 +10,7 @@ grace_claims.json.*
 events.jsonl
 models-*.json
 switch-*.json
+abort-*.json
 preferences.json
 launch-suppressed.json
 *.log

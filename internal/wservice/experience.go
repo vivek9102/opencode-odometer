@@ -39,6 +39,7 @@ func (s *Service) Ready() {
 		return
 	}
 	s.applyPosition()
+	runtime.WindowSetAlwaysOnTop(s.Ctx, true)
 	runtime.WindowShow(s.Ctx)
 	// OpenCode launches with windowsHide. Windows can apply that startup flag
 	// to the first ShowWindow call, so repeat it after Wails records the first
@@ -63,6 +64,7 @@ func (s *Service) ShowFromTray() {
 		return
 	}
 	runtime.WindowUnminimise(s.Ctx)
+	runtime.WindowSetAlwaysOnTop(s.Ctx, true)
 	runtime.WindowShow(s.Ctx)
 	s.applyPosition()
 }

@@ -76,6 +76,7 @@ type ConfiguredModel struct {
 	Rate     *ModelPrice `json:"rate,omitempty"`
 }
 type ModelInventory struct {
+	AbortProtocol  int               `json:"abort_protocol"`
 	SwitchProtocol int               `json:"switch_protocol"`
 	PID            int               `json:"pid"`
 	Instance       string            `json:"instance"`
@@ -175,6 +176,19 @@ func modelCategory(key string) string {
 	default:
 		return "chat"
 	}
+}
+
+// freeModelKeys publishes the price book's classification to budget hooks.
+func (a *App) freeModelKeys() []string {
+	var keys []string
+	for _, m := range a.configuredModels() {
+		r := a.Prices.Entry(m.Key)
+		if r.Free && !r.Unknown && (m.Category == "chat" || m.Category == "" && modelCategory(m.Key) == "chat") {
+			keys = append(keys, m.Key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // ModelChoices lists configured models, including nano, Gemma and specialised
@@ -282,6 +296,9 @@ func (a *App) RequestModelSwitch(sid, key string) (ModelSwitch, error) {
 	if !available {
 		return ModelSwitch{}, fmt.Errorf("this model is unavailable in the running OpenCode instance")
 	}
+	// Publish the free-model classification before making a selection visible
+	// to a prompt, including providers that appeared since the last poll.
+	a.PublishBudget()
 	target := filepath.Join(a.experienceDir(), "switch-session-"+sid+".json")
 	var previous ModelSwitch
 	old, _ := os.ReadFile(target)

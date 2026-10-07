@@ -190,12 +190,6 @@ tr.unknown td { color: var(--amber); }
 /* estimated rate: readable, but visibly not authoritative */
 tr.estimated td:last-child { color: var(--text-lo); font-style: italic; }
 
-/* quiet footer note about estimated rates */
-.est-note {
-  font-family: var(--font-mono); font-size: 10px; color: var(--dim);
-  align-self: center; cursor: help; white-space: nowrap;
-}
-
 /* fixed footer region */
 .fixed-footer-region {
   display: flex;
@@ -244,6 +238,9 @@ select {
 .ctl.right { margin-left: auto; background: #166534; }
 .ctl.stop { background: #7f1d1d; }
 .ctl.stop:hover { filter: brightness(1.4); }
+.utility-row {display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--edge);padding-top:8px;}
+.utility-group {display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.ctl.utility {background:transparent;color:var(--dim);padding-left:0;}
 
 /* modal overlay */
 .modal {

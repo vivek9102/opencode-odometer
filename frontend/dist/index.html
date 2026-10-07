@@ -60,7 +60,7 @@
 
     <!-- Fixed Footer Region -->
     <div class="fixed-footer-region">
-      <div class="activity-row"><svg id="bd-spark" viewBox="0 0 260 24" role="img" aria-label="Recent spending"><polyline /></svg><span>last 10 min</span><span id="pause-status" class="hidden">Enforcement paused</span><button id="bd-settings" class="ctl">SETTINGS</button><button id="bd-hide" class="ctl">HIDE TO TRAY</button></div>
+      <div class="activity-row"><svg id="bd-spark" viewBox="0 0 260 24" role="img" aria-label="Recent spending"><polyline /></svg><span>last 10 min</span><span id="pause-status" class="hidden">Enforcement paused</span></div>
       <!-- session budget row -->
       <div class="budget-row">
         <label class="chk" title="Applies to each chat separately, not to your total spend."><input type="checkbox" id="bd-enabled" /> LIMIT PER CHAT</label>
@@ -88,9 +88,10 @@
         <button id="bd-dock" class="ctl" title="Cycle dock position (F2)">DOCK</button>
         <button id="bd-switch" class="ctl switch" title="Show cheaper models">MODELS</button>
         <button id="bd-stop" class="ctl stop" title="Abort the active session in OpenCode">STOP SESSION</button>
-        <span id="bd-estimated" class="est-note hidden"></span>
-        <button id="bd-unpriced" class="ctl unpriced hidden" title="Some models have no price, so their spend is not counted"></button>
-        <button id="bd-export" class="ctl right">EXPORT CSV</button>
+      </div>
+      <div class="utility-row">
+        <div class="utility-group"><button id="bd-export" class="ctl utility">EXPORT CSV</button><button id="bd-unpriced" class="ctl unpriced hidden" title="Review estimated or unknown model prices"></button></div>
+        <div class="utility-group"><button id="bd-settings" class="ctl">SETTINGS</button><button id="bd-hide" class="ctl">HIDE TO TRAY</button></div>
       </div>
     </div>
   </div>
@@ -159,6 +160,7 @@
         only to new messages; recorded history never changes. If no public match
         exists, the model stays at $0 until you save a price.
       </p>
+      <p id="bd-estimated" class="modal-sub hidden"></p>
       <div id="price-list" class="model-list"></div>
     </div>
   </div>

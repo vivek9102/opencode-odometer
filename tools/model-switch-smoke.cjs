@@ -7,6 +7,7 @@ const {join,resolve}=require('node:path');
 const assert=require('node:assert/strict');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const root=process.env.OPENCODE_SMOKE_DIR || resolve(__dirname,'../build/model-switch-smoke');
+const freeBudget=process.env.OPENCODE_SMOKE_FREE_BUDGET==='1';
 const exe=process.env.OPENCODE_SMOKE_EXE;
 if(!exe)throw Error('Set OPENCODE_SMOKE_EXE');
 async function freePort(){const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));return port;}
@@ -19,6 +20,11 @@ async function freePort(){const server=createServer();await new Promise(r=>serve
   const id='fake-'+requested.length,base={id,object:'chat.completion.chunk',created:Math.floor(Date.now()/1000),model:input.model};
   if(input.stream){
    res.writeHead(200,{'Content-Type':'text/event-stream'});
+   if(freeBudget && input.model==='selected' && !input.messages.some(m=>m.role==='tool')){
+    assert.ok(input.tools.some(t=>t.function?.name==='read'),'read tool unavailable');
+    res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'read-sample',type:'function',function:{name:'read',arguments:JSON.stringify({filePath:join(root,'sample.txt')})}}]},finish_reason:null}]})+'\n\n');
+    res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:10,completion_tokens:3,total_tokens:13}})+'\n\n');res.end('data: [DONE]\n\n');return;
+   }
    res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{role:'assistant',content:'LOCAL MOCK OK'},finish_reason:null}]})+'\n\n');
    res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:3,total_tokens:13}})+'\n\n');
    res.end('data: [DONE]\n\n');
@@ -26,11 +32,12 @@ async function freePort(){const server=createServer();await new Promise(r=>serve
  });
  await new Promise(r=>provider.listen(0,'127.0.0.1',r));
  const config=join(root,'config'),data=join(root,'odometer');mkdirSync(config,{recursive:true});mkdirSync(data,{recursive:true});
+ if(freeBudget)writeFileSync(join(root,'sample.txt'),'LOCAL MOCK OK');
  writeFileSync(join(data,'preferences.json'),JSON.stringify({auto_start:false}));
  const plugin=join(config,'odometer.js');
  writeFileSync(plugin,readFileSync(join(__dirname,'../plugin/odometer.js'),'utf8').replace('const SERVER_POINTER_FILE = join(homedir(), ".opencode-odometer-server.json")','const SERVER_POINTER_FILE = process.env.OPENCODE_ODOMETER_SERVER_POINTER'));
  const model={limit:{context:10000,output:100},cost:{input:1,output:1}};
- writeFileSync(join(config,'opencode.json'),JSON.stringify({autoupdate:false,model:'smoke/default',small_model:'smoke/default',agent:{build:{model:'smoke/default'}},plugin:[plugin.replaceAll('\\','/')],enabled_providers:['smoke'],provider:{smoke:{npm:'@ai-sdk/openai-compatible',name:'Local smoke',options:{baseURL:`http://127.0.0.1:${provider.address().port}/v1`,apiKey:'local-test-only'},models:{default:{...model,name:'Default'},selected:{...model,name:'Selected'}}}}}));
+ writeFileSync(join(config,'opencode.json'),JSON.stringify({autoupdate:false,model:'smoke/default',small_model:'smoke/default',permission:{read:'allow'},agent:{build:{model:'smoke/default'}},plugin:[plugin.replaceAll('\\','/')],enabled_providers:['smoke'],provider:{smoke:{npm:'@ai-sdk/openai-compatible',name:'Local smoke',options:{baseURL:`http://127.0.0.1:${provider.address().port}/v1`,apiKey:'local-test-only'},models:{default:{...model,name:'Default'},selected:{...model,name:'Selected',...(freeBudget ? {cost:{input:0,output:0}} : {})}}}}}));
  const env={...process.env,OPENCODE_TEST_HOME:join(root,'home'),XDG_CONFIG_HOME:join(root,'xdg-config'),XDG_DATA_HOME:join(root,'xdg-data'),XDG_CACHE_HOME:join(root,'xdg-cache'),XDG_STATE_HOME:join(root,'xdg-state'),OPENCODE_CONFIG_DIR:config,OPENCODE_DISABLE_PROJECT_CONFIG:'1',OPENCODE_DISABLE_MODELS_FETCH:'1',OPENCODE_DISABLE_DEFAULT_PLUGINS:'1',OPENCODE_ODOMETER_DIR:data,OPENCODE_ODOMETER_HOME:data,OPENCODE_ODOMETER_POINTER:join(data,'pointer.json'),OPENCODE_ODOMETER_SERVER_POINTER:join(data,'server.json')};
  let child,base,logs='';
  async function start(){
@@ -48,11 +55,27 @@ async function freePort(){const server=createServer();await new Promise(r=>serve
  }
  async function stop(){if(!child||child.exitCode!==null)return;const ended=new Promise(r=>child.once('exit',r));child.kill();await Promise.race([ended,wait(2000)]);}
  async function api(path,body){const response=await fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});assert.ok(response.ok,'HTTP '+response.status+' '+await response.clone().text());return response.json();}
- async function prompt(sid){return api('/session/'+sid+'/message',{agent:'build',model:{providerID:'smoke',modelID:'default'},parts:[{type:'text',text:'Reply with LOCAL MOCK OK. Do not use tools.'}]});}
+ async function prompt(sid){return api('/session/'+sid+'/message',{agent:'build',model:{providerID:'smoke',modelID:'default'},parts:[{type:'text',text:freeBudget ? 'Read sample.txt using read and reply LOCAL MOCK OK.' : 'Reply with LOCAL MOCK OK. Do not use tools.'}]});}
  const queue=(sid,id,key='smoke/selected')=>writeFileSync(join(data,`switch-session-${sid}.json`),JSON.stringify({id,session_id:sid,key,persistent:true,issued:Math.floor(Date.now()/1000)}));
  try{
   await start();const firstPID=child.pid;
   const chat=await api('/session',{title:'Model routing smoke'}),other=await api('/session',{title:'Other chat'});
+  if(freeBudget){
+   await prompt(other.id); // Warm OpenCode's isolated project before testing hooks.
+   const budget={enabled:true,updated:Date.now()/1000,mode:'hard',free_models:['smoke/selected'],sessions:{[chat.id]:{state:'over',enforced:true,cost:2,limit:1,fraction:2,past_hard_stop:true}}};
+   const budgetFile=join(data,'budget.json');writeFileSync(budgetFile,JSON.stringify(budget));queue(chat.id,'free-after-limit');
+   const selected=await prompt(chat.id);assert.equal(selected.info.modelID,'selected');assert.equal(selected.info.error,undefined);
+   const messages=await (await fetch(base+'/session/'+chat.id+'/message')).json();
+   const reads=messages.flatMap(m=>m.parts||[]).filter(p=>p.type==='tool'&&p.tool==='read');
+   assert.ok(reads.some(p=>p.state?.status==='completed'),'free tool was blocked by the exhausted budget');
+   const later=await prompt(chat.id);assert.equal(later.info.modelID,'selected');assert.equal(later.info.error,undefined);
+   const callsBefore=requested.length;queue(chat.id,'back-to-paid','smoke/default');
+   try{await prompt(chat.id)}catch{/* a blocked prompt can close without a JSON response */}
+   assert.equal(requested.length,callsBefore,'a paid model reached the provider after the exhausted limit');
+   queue(chat.id,'free-again');const recovered=await prompt(chat.id);assert.equal(recovered.info.modelID,'selected');assert.equal(recovered.info.error,undefined,'blocked paid request broke the chat');
+   const after=JSON.parse(readFileSync(budgetFile));assert.equal(after.enabled,true);assert.equal(after.sessions[chat.id].cost,2);assert.equal(after.sessions[chat.id].limit,1);
+   const result={success:true,freeAfterLimit:true,freeToolCompleted:true,laterFreeTurn:true,paidBlocked:true,freeAfterBlockedPaid:true,budgetPreserved:true,providerRequests:requested};writeFileSync(join(root,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));return;
+  }
   queue(chat.id,'restart-choice');
   await stop();await start();assert.notEqual(child.pid,firstPID);
   // A different chat must retain its default and leave the selection intact.

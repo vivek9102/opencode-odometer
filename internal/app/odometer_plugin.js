@@ -25,6 +25,8 @@ import {
   mkdirSync,
   statSync,
   rmSync,
+  readdirSync,
+  watch,
 } from "node:fs"
 import { dirname, isAbsolute, join } from "node:path"
 import { homedir, tmpdir } from "node:os"
@@ -519,6 +521,11 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
   const bridgeDir = () => pointer()?.data_dir || DATA_DIR
   const pending = new Map()
   const awaiting = new Map()
+  // Bound to the actual turn, not to a picker choice that may target the next
+  // turn while a paid response is still running.
+  const turnModels = new Map()
+  const modelKey = model => model?.providerID && model?.modelID ? model.providerID+"/"+model.modelID : ""
+  const confirmedFree = (doc,key) => !!key && Array.isArray(doc?.free_models) && doc.free_models.includes(key)
   let inventory = []
   const observedSessions = new Set()
   const sessionParents = new Map()
@@ -536,13 +543,14 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     const sid = session?.id
     if (!sid) return
     const parent = session.parentID || ""
+    const newOwnership=!observedSessions.has(sid) || (parent && !observedSessions.has(parent))
     if (sessionParents.get(sid) !== parent) {
       sessionParents.set(sid, parent)
       spoolWrite({type:"session", id:sid, parentID:parent})
     }
     observeID(sid, false)
     if (parent) observeID(parent, false)
-    heartbeat()
+    heartbeat(!!newOwnership)
   }
   function observeID(sid, force = true) {
     if (!sid) return
@@ -552,7 +560,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       return
     }
     observedSessions.add(sid)
-    if (observedSessions.size > 100) observedSessions.delete(observedSessions.values().next().value)
+    if (observedSessions.size > 100) {const oldest=observedSessions.values().next().value;observedSessions.delete(oldest);turnModels.delete(oldest)}
     heartbeat(force)
   }
   function atomicBridge(name, doc) {
@@ -577,7 +585,45 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     const now = Date.now()
     if (!force && now-lastHeartbeat < 10_000) return
     lastHeartbeat = now
-    try { atomicBridge(`models-${process.pid}.json`, { switch_protocol:3, pid: process.pid, instance:PLUGIN_INSTANCE, updated: Math.floor(Date.now()/1000), sessions: [...observedSessions], models: inventory }) } catch { /* bridge is optional */ }
+    try { atomicBridge(`models-${process.pid}.json`, { switch_protocol:3, abort_protocol:1, pid: process.pid, instance:PLUGIN_INSTANCE, updated: Math.floor(Date.now()/1000), sessions: [...observedSessions], models: inventory }) } catch { /* bridge is optional */ }
+  }
+  function chatRoot(sid) {
+    const seen=new Set();
+    while(sessionParents.get(sid) && !seen.has(sid)){seen.add(sid);sid=sessionParents.get(sid)}
+    return sid;
+  }
+  async function executeAbort(req) {
+    let status="stopped",detail="OpenCode acknowledged cancellation.";
+    try {
+      if(Date.now()/1000-req.issued>30)throw new Error("Stop request expired. Try again.");
+      if(!observedSessions.has(req.session_id))throw new Error("The requested chat is unavailable in this OpenCode instance.");
+      // Cancel the parent and its delegated sessions together, leaving other
+      // chats running. Abort executes outside event hooks: the SDK publishes
+      // idle events while cancelling, so awaiting it in a hook can deadlock.
+      const ids=new Set([req.session_id,...[...observedSessions].filter(sid=>chatRoot(sid)===req.session_id)]);
+      await Promise.all([...ids].map(async id=>{
+        const result=await sdkCall(signal=>client.session.abort({path:{id},signal}));
+        if(result?.error || result?.data===false || result===false)throw new Error("OpenCode rejected cancellation for "+id);
+      }));
+    }catch(err){status="failed";detail=err?.message || "OpenCode could not stop this chat."}
+    try{atomicBridge(`abort-status-${req.id}.json`,{id:req.id,status,detail})}catch{/* caller reports timeout */}
+  }
+  function drainAborts() {
+    let names;
+    try{names=readdirSync(bridgeDir())}catch{return}
+    for(const name of names){
+      if(!new RegExp(`^abort-${process.pid}-[a-zA-Z0-9-]+\\.json$`).test(name))continue;
+      const target=join(bridgeDir(),name);
+      let req;
+      try{
+        req=JSON.parse(readFileSync(target,"utf8"));
+        if(req.instance!==PLUGIN_INSTANCE || !/^[a-zA-Z0-9-]+$/.test(req.id) || !req.session_id)continue;
+        // Claim synchronously before scheduling any SDK work; watcher and
+        // fallback polling cannot execute a request twice.
+        rmSync(target);
+      }catch{continue}
+      void executeAbort(req);
+    }
   }
   async function refreshInventory() {
     if (inventoryBusy) return
@@ -603,9 +649,14 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     bridgeWork = consumeSwitch().finally(() => { bridgeWork = null })
     return bridgeWork
   }
+  function pendingSelection(sid) {
+    const req=pending.get(sid)
+    if(req && Date.now()/1000-req.issued>600){pending.delete(sid);writeSwitchStatus(req,"expired","No request was submitted within ten minutes.");return}
+    return req
+  }
   // Durable selections belong to a chat, never to a process or its bounded
   // ownership history. Claim only inside that chat's actual prompt hook.
-  function takeChatSelection(sid) {
+  function takeChatSelection(sid, peek = false) {
     if (!sid || !/^[a-zA-Z0-9_-]+$/.test(sid)) return
     const target=join(bridgeDir(),`switch-session-${sid}.json`)
     const claim=target+`.${process.pid}.claim`
@@ -613,7 +664,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     try { req=JSON.parse(readFileSync(target,"utf8")) } catch { return }
     // Chat choices are read on every turn. Older one-request files retain
     // their original semantics until the user makes a new persistent choice.
-    if (!req.persistent) {
+    if (!req.persistent && !peek) {
     try { renameSync(target,claim) } catch { return }
     try {
       req=JSON.parse(readFileSync(claim,"utf8"))
@@ -622,7 +673,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     }
     if (!req?.id || !/^[a-zA-Z0-9-]+$/.test(req.id) || req.session_id!==sid) return
     const previous=pending.get(sid)
-    if(previous) { pending.delete(sid);writeSwitchStatus(previous,"cancelled","Replaced by a newer selection.") }
+    if(previous && !peek) { pending.delete(sid);writeSwitchStatus(previous,"cancelled","Replaced by a newer selection.") }
     const model=inventory.find(m=>m.key===req.key)
     if (!model || model.category!=="chat") {
       const detail=model ? "This specialised model cannot run a coding chat." : "The selected model is unavailable in this OpenCode instance. Choose another model."
@@ -659,6 +710,23 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
   // Provider initialization can depend on Plugin.init(). Awaiting /provider
   // here forms a cycle and leaves OpenCode on a blank startup screen.
   heartbeat(true)
+  // Avoid adding a native filesystem watcher inside Bun on Windows. Polling
+  // the small command directory keeps cancellation independent of chat events
+  // and avoids that runtime's watcher lifecycle entirely.
+  if(process.platform==="win32") {
+    const abortTimer=setInterval(drainAborts,250)
+    abortTimer.unref?.()
+  } else try {
+    const abortWatcher=watch(bridgeDir(),(_event,name)=>{
+      // Windows can keep delivering rename events after a watched directory
+      // is removed; release that handle instead of spinning on stale state.
+      if(!existsSync(bridgeDir())){abortWatcher.close();return;}
+      if(name?.toString().startsWith(`abort-${process.pid}-`))drainAborts();
+    });
+    abortWatcher.on("error",()=>abortWatcher.close());
+    abortWatcher.unref?.();
+  }catch{/* polling fallback */}
+  drainAborts()
   const startupTimer = setTimeout(() => {
     refreshInventory()
     spoolBackfill(client, observeSession)
@@ -668,6 +736,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     heartbeat()
     drainSwitch()
     drainCommands(client)
+    drainAborts()
     const now=Date.now()/1000
     if(!inventory.length && !inventoryBusy && now-lastInventoryAttempt>=5) void refreshInventory()
     for (const [sid,req] of pending) if(now-req.issued>600) {pending.delete(sid);writeSwitchStatus(req,"expired","No request was submitted within ten minutes.")}
@@ -677,11 +746,14 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
   const inventoryTimer=setInterval(refreshInventory, 60_000)
   inventoryTimer.unref?.()
 
-  async function enforceChat(input) {
+  async function enforceChat(input, key = "") {
       if (process.env.OPENCODE_ODOMETER_NOBLOCK === "1") return
 
       const doc = readBudget()
       if (!doc || !doc.enabled) return
+      // Historical spend stays over the limit. Only this confirmed free
+      // request is allowed; paid requests still use the existing verdict.
+      if (confirmedFree(doc,key)) return
 
       const s = sessionBudget(doc, input.sessionID)
       if (!s) return
@@ -746,8 +818,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
         ? `Hard stop at ${s.hard_stop_at}x limit`
         : "Budget limit reached"
       const detail =
-        `$${s.cost.toFixed(2)} of $${s.limit} spent. Raise the limit in the ` +
-        `Odometer window, or set OPENCODE_ODOMETER_NOBLOCK=1 to bypass.`
+        `$${s.cost.toFixed(2)} of $${s.limit} spent. Choose a free model or raise the limit in Odometer to continue.`
 
       // Always toast: this is the part the user actually reads.
       if (!blockNotified.has(sid)) {
@@ -759,36 +830,11 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
         )
       }
 
-      // Prefer a real abort over a thrown Error. `session.abort` is the same
-      // path the Esc key uses, so OpenCode renders it as a normal cancellation
-      // instead of an unhandled-plugin-exception stack trace.
-      let aborted = false
-      try {
-        await sdkCall(signal => client.session.abort({ path: { id: sid }, signal }))
-        aborted = true
-      } catch {
-        try {
-          // older/newer SDKs name the path param differently
-          await sdkCall(signal => client.session.abort({ path: { sessionID: sid }, signal }))
-          aborted = true
-        } catch {
-          /* fall through to throwing */
-        }
-      }
-
-      if (aborted) {
-        // Give the abort a moment to land, then leave quietly. The turn is
-        // already cancelled; throwing on top would re-introduce the ugly error.
-        await new Promise((r) => setTimeout(r, 50))
-        return false
-      }
-
-      // Fallback only: abort unavailable. Mimic OpenCode's own cancellation
-      // error so the TUI treats it as an abort rather than a plugin crash.
-      const err = new Error(`${reason} - ${detail}`)
-      err.name = "MessageAbortedError"
-      err.data = { message: `${reason} - ${detail}` }
-      throw err
+      // chat.message runs before OpenCode creates the prompt loop. An abort
+      // here can succeed against an idle session and the loop still starts.
+      // Reject the hook to prevent dispatch; Stop Session retains SDK abort
+      // for responses that are actually running.
+      throw hardLimitToolCancellation(reason,detail)
   }
 
   return {
@@ -796,7 +842,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       // Execute anything the odometer asked for (e.g. STOP SESSION). Events
       // fire continuously during a turn, so this stays responsive without a
       // timer of its own.
-      await drainCommands(client)
+      void drainCommands(client)
 
       void drainSwitch()
       const info=event.properties?.info || event.properties?.message
@@ -804,6 +850,8 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       if (event.type === "session.created" || event.type === "session.updated") observeSession(info)
       if (sid) observeID(sid)
       if (info?.role === "assistant") {
+        const turn=turnModels.get(info.sessionID)
+        if(!turn || info.parentID===turn.userID)turnModels.set(info.sessionID,{key:modelKey(info),userID:info.parentID})
         const req=awaiting.get(info.sessionID)
         if(req && info.parentID === req.message_id) {
           awaiting.delete(info.sessionID)
@@ -835,6 +883,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       }
       // a session that drops back under its cap can warn/block again later
       if (event.type === "session.idle") {
+        turnModels.delete(event.properties?.sessionID)
         const doc = readBudget()
         const s = doc?.sessions?.[event.properties?.sessionID]
         if (s && s.state === "ok") {
@@ -854,6 +903,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       if (!doc || !doc.enabled) return
 
       const sid = input.sessionID
+      if(confirmedFree(doc,turnModels.get(sid)?.key))return
       const s = sessionBudget(doc, sid)
       if (!s) return
 
@@ -877,26 +927,24 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
 
     "chat.message": async (input, output) => {
       observeID(input.sessionID)
-      await drainCommands(client)
+      void drainCommands(client)
       await drainSwitch()
-      const allowed = await enforceChat(input)
-      if (allowed === false) return
+      if (existsSync(join(bridgeDir(),`switch-session-${input.sessionID}.json`)) && !inventory.length) await refreshInventory()
+      // Inspect without consuming a one-shot choice: paid choices must remain
+      // queued when the cap refuses the turn.
+      const preview=takeChatSelection(input.sessionID,true) || pendingSelection(input.sessionID)
+      const previewKey=(output?.message && preview?.key) || modelKey(output?.message?.model || input.model)
+      await enforceChat(input,previewKey)
       // Budget checks happen before claiming: a blocked turn keeps its choice.
       if (!output?.message) return
-      if (existsSync(join(bridgeDir(),`switch-session-${input.sessionID}.json`)) && !inventory.length) await refreshInventory()
       const durable = takeChatSelection(input.sessionID)
-      const req = durable || pending.get(input.sessionID)
+      const req = durable || pendingSelection(input.sessionID)
+      const key=req?.key || modelKey(output.message.model || input.model)
+      // A choice can change while the async budget check is running. Recheck
+      // its actual key so a free-to-paid race cannot bypass enforcement.
+      if(key!==previewKey)await enforceChat(input,key)
+      turnModels.set(input.sessionID,{key,userID:output.message.id})
       if (!req) return
-      if (!durable && Date.now() / 1000 - req.issued > 600) {
-        pending.delete(input.sessionID)
-        writeSwitchStatus(req, "expired", "No request was submitted within ten minutes.")
-        return
-      }
-      if (!output?.message) {
-        writeSwitchStatus(req, "failed", "This OpenCode version does not expose a mutable chat message.")
-        pending.delete(input.sessionID)
-        return
-      }
       const slash = req.key.indexOf("/")
       output.message.model = { providerID: req.key.slice(0, slash), modelID: req.key.slice(slash + 1) }
       delete output.message.variant

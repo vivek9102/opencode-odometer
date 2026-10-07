@@ -187,6 +187,7 @@ func New(cfg Config) (*App, error) {
 	if a.Seeded() {
 		a.PublishBudget()
 	} else if err := a.Contract.WriteBudget(plugin.BudgetFile{
+		FreeModels:        a.freeModelKeys(),
 		Enabled:           a.Budget.Enabled() && !a.Preferences().Paused,
 		SessionLimitUSD:   a.Budget.Limit(),
 		WarnAtPercent:     a.Budget.Cfg.WarnAtPercent,
@@ -737,6 +738,7 @@ func (a *App) PublishBudget() {
 	}
 
 	doc := plugin.BudgetFile{
+		FreeModels:        a.freeModelKeys(),
 		Enabled:           a.Budget.Enabled() && !a.Preferences().Paused,
 		SessionLimitUSD:   a.Budget.Limit(),
 		WarnAtPercent:     a.Budget.Cfg.WarnAtPercent,

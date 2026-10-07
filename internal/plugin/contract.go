@@ -36,6 +36,9 @@ type Session struct {
 
 // BudgetFile is the full document written to budget.json.
 type BudgetFile struct {
+	// FreeModels comes from the same price book as accounting and the picker.
+	// Missing/unknown prices are never permission to bypass a spending cap.
+	FreeModels        []string           `json:"free_models,omitempty"`
 	Enabled           bool               `json:"enabled"`
 	SessionLimitUSD   float64            `json:"session_limit_usd"`
 	WarnAtPercent     int                `json:"warn_at_percent"`
