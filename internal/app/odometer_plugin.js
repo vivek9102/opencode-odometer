@@ -746,7 +746,17 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
   const inventoryTimer=setInterval(refreshInventory, 60_000)
   inventoryTimer.unref?.()
 
-  async function enforceChat(input, key = "") {
+  function deferBudgetBlock(input, output, key) {
+    if (!output?.message) return
+    const slash = key.indexOf("/")
+    if (slash > 0) {
+      output.message.model = {providerID:key.slice(0,slash),modelID:key.slice(slash+1)}
+      delete output.message.variant
+    }
+    turnModels.set(input.sessionID,{key,userID:output.message.id,blocked:true})
+  }
+
+  async function enforceChat(input, key = "", deferBlock = false) {
       if (process.env.OPENCODE_ODOMETER_NOBLOCK === "1") return
 
       const doc = readBudget()
@@ -814,27 +824,22 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
         // silently granting unlimited grace.
       }
 
-      const reason = s.past_hard_stop
-        ? `Hard stop at ${s.hard_stop_at}x limit`
+      // chat.message executes outside OpenCode's response error handler.
+      // Let that hook save the user's message, then refuse the request in
+      // chat.params, inside the handled stream and before provider dispatch.
+      if (deferBlock) return true
+      const reason = s.past_hard_stop && mode === "soft"
+        ? `Hard stop at ${s.hard_stop_at || 1.5}x limit`
         : "Budget limit reached"
       const detail =
         `$${s.cost.toFixed(2)} of $${s.limit} spent. Choose a free model or raise the limit in Odometer to continue.`
 
       // Always toast: this is the part the user actually reads.
-      if (!blockNotified.has(sid)) {
-        blockNotified.add(sid)
-        await toast(
-          s.past_hard_stop ? "Hard stop reached" : "Session budget reached",
-          detail,
-          "error",
-        )
-      }
-
-      // chat.message runs before OpenCode creates the prompt loop. An abort
-      // here can succeed against an idle session and the loop still starts.
-      // Reject the hook to prevent dispatch; Stop Session retains SDK abort
-      // for responses that are actually running.
-      throw hardLimitToolCancellation(reason,detail)
+      await toast(reason, detail, "error")
+      // OpenCode converts AbortError into a handled MessageAbortedError.
+      // Show the limit notification on each refused attempt, including after
+      // a free turn, rather than suppressing it for the whole budget period.
+      throw new DOMException(`${reason} - ${detail}`, "AbortError")
   }
 
   return {
@@ -851,7 +856,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       if (sid) observeID(sid)
       if (info?.role === "assistant") {
         const turn=turnModels.get(info.sessionID)
-        if(!turn || info.parentID===turn.userID)turnModels.set(info.sessionID,{key:modelKey(info),userID:info.parentID})
+        if(!turn || info.parentID===turn.userID)turnModels.set(info.sessionID,{...turn,key:modelKey(info),userID:info.parentID})
         const req=awaiting.get(info.sessionID)
         if(req && info.parentID === req.message_id) {
           awaiting.delete(info.sessionID)
@@ -934,7 +939,10 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       // queued when the cap refuses the turn.
       const preview=takeChatSelection(input.sessionID,true) || pendingSelection(input.sessionID)
       const previewKey=(output?.message && preview?.key) || modelKey(output?.message?.model || input.model)
-      await enforceChat(input,previewKey)
+      if (await enforceChat(input,previewKey,true)) {
+        deferBudgetBlock(input,output,previewKey)
+        return
+      }
       // Budget checks happen before claiming: a blocked turn keeps its choice.
       if (!output?.message) return
       const durable = takeChatSelection(input.sessionID)
@@ -942,8 +950,11 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       const key=req?.key || modelKey(output.message.model || input.model)
       // A choice can change while the async budget check is running. Recheck
       // its actual key so a free-to-paid race cannot bypass enforcement.
-      if(key!==previewKey)await enforceChat(input,key)
-      turnModels.set(input.sessionID,{key,userID:output.message.id})
+      if(key!==previewKey && await enforceChat(input,key,true)) {
+        deferBudgetBlock(input,output,key)
+        return
+      }
+      turnModels.set(input.sessionID,{key,approvedKey:key,userID:output.message.id})
       if (!req) return
       const slash = req.key.indexOf("/")
       output.message.model = { providerID: req.key.slice(0, slash), modelID: req.key.slice(slash + 1) }
@@ -953,6 +964,16 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       pending.delete(input.sessionID)
       awaiting.set(input.sessionID, req)
       writeSwitchStatus(req, "applied", req.persistent ? "Applied to this message. This model stays active for the chat." : "Applied to the next request; awaiting OpenCode's response.")
+    },
+    "chat.params": async (input) => {
+      const key = modelKey({providerID:input.model?.providerID,modelID:input.model?.id})
+      const turn = turnModels.get(input.sessionID)
+      // An allowed turn has already claimed its grace in chat.message. Do
+      // not charge grace again on each model step. Deferred blocks and an
+      // actual model differing from that choice still need enforcement.
+      if (!turn || turn.blocked || turn.userID !== input.message?.id || turn.approvedKey !== key) {
+        await enforceChat(input,key)
+      }
     },
   }
 }

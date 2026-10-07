@@ -229,6 +229,8 @@ select {
 
 /* bottom controls */
 .controls { display: flex; gap: 6px; flex-wrap: wrap; padding: 2px 0 0; }
+.controls-main { display: flex; gap: 6px; flex-wrap: wrap; }
+.controls-session { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
 .ctl {
   background: var(--edge); border: none; color: #fff; padding: 5px 10px;
   font-weight: bold; font-size: 11px; border-radius: 2px;

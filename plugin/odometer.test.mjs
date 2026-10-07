@@ -68,21 +68,28 @@ test('chat model routing persists choices and preserves nested IDs, budgets and 
   await hooks.event({event:{type:'session.idle',properties:{sessionID:'s1'}}});await new Promise(r=>setTimeout(r,30))
   assert.equal(status('req3').status,'failed','specialised models remain listed but cannot route a coding chat')
   process.env.OPENCODE_ODOMETER_NOBLOCK='0'
+  const budgetRequest=async(sid,output)=>{
+    await hooks['chat.message']({sessionID:sid},output)
+    const model=output.message.model || {}
+    await hooks['chat.params']({sessionID:sid,message:output.message,model:{providerID:model.providerID,id:model.modelID}})
+  }
   command('req4','custom/google/gemma-4')
   writeFileSync(join(dir,'budget.json'),JSON.stringify({enabled:true,updated:Date.now()/1000,mode:'hard',sessions:{s1:{state:'over',enforced:true,cost:2,limit:1,fraction:2}}}))
-  await assert.rejects(hooks['chat.message']({sessionID:'s1'},{message:{id:'blocked',model:{providerID:'old',modelID:'expensive'}}}))
+  await assert.rejects(budgetRequest('s1',{message:{id:'blocked',model:{providerID:'old',modelID:'expensive'}}}),{name:'AbortError'})
   assert.notEqual(status('req4').status,'applied','a blocked prompt must not consume its model choice')
   writeFileSync(join(dir,'switch-session-s1.json'),JSON.stringify({id:'blocked-durable',key:'custom/google/gemma-4',session_id:'s1',issued:Date.now()/1000}))
-  await assert.rejects(hooks['chat.message']({sessionID:'s1'},{message:{id:'blocked-again'}}))
+  await assert.rejects(budgetRequest('s1',{message:{id:'blocked-again'}}),{name:'AbortError'})
   assert.ok(existsSync(join(dir,'switch-session-s1.json')),'budget enforcement consumed a durable selection')
   await hooks.event({event:{type:'session.created',properties:{info:{id:'child',parentID:'s1'}}}})
   await assert.rejects(hooks['tool.execute.before']({sessionID:'child'}),'a new child must inherit the exhausted root cap before the next odometer poll')
-  await assert.rejects(hooks['chat.message']({sessionID:'child'},{message:{id:'child-blocked'}}))
+  await assert.rejects(budgetRequest('child',{message:{id:'child-blocked'}}),{name:'AbortError'})
   const spool=readFileSync(join(dir,'events.jsonl'),'utf8').trim().split('\n').map(JSON.parse)
   assert.ok(spool.some(r=>r.type==='session'&&r.id==='child'&&r.parentID==='s1'))
   writeFileSync(join(dir,'budget.json'),JSON.stringify({enabled:true,updated:Date.now()/1000,mode:'soft',sessions:{s1:{budget_session_id:'s1',state:'over',enforced:true,cost:1.1,limit:1,fraction:1.1,grace_remaining:1}}}))
-  await hooks['chat.message']({sessionID:'child'},{message:{id:'one-grace'}})
+  const grace={message:{id:'one-grace',model:{providerID:'custom',modelID:'google/gemma-4'}}}
+  await budgetRequest('child',grace)
+  await hooks['chat.params']({sessionID:'child',message:grace.message,model:{providerID:'custom',id:'google/gemma-4'}})
   assert.deepEqual(JSON.parse(readFileSync(join(dir,'grace_claims.json'),'utf8')),{s1:1})
-  await assert.rejects(hooks['chat.message']({sessionID:'child'},{message:{id:'extra-grace'}}),'an unacknowledged grace claim must not be repeated')
+  await assert.rejects(budgetRequest('child',{message:{id:'extra-grace'}}),{name:'AbortError'},'an unacknowledged grace claim must not be repeated')
  } finally {rmSync(dir,{recursive:true,force:true})}
 })

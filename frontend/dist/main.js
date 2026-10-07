@@ -620,25 +620,28 @@ function openPriceModal() {
 
 function closePriceModal() { priceModal.classList.add("hidden"); }
 
-// Show how old the price table is. Rates drift, and a table with no stated age
-// implies it is current when it may be months old.
+// Keep catalog age in the tooltip so it cannot push session controls onto
+// their own row as the catalog gets older.
 function refreshPricesAge() {
   if (!window.go || !window.go.wservice) return;
   Svc().PricesAgeHours().then((h) => {
     const btn = $("bd-update-prices");
+    btn.textContent = "UPDATE CATALOG";
     // -1 means the built-in snapshot: it has no meaningful age, and showing
     // one made a fresh install claim its prices were a year old.
     if (h < 0) {
-      btn.textContent = "UPDATE CATALOG (built-in)";
       btn.title = "Using bundled prices. Download the latest catalog for future usage.";
       btn.classList.remove("unpriced");
       return;
     }
-    if (!(h > 0)) { btn.textContent = "UPDATE CATALOG"; return; }
+    if (!(h > 0)) {
+      btn.title = "Prices just updated. Download latest rates for future usage; history remains unchanged.";
+      btn.classList.remove("unpriced");
+      return;
+    }
     const days = Math.floor(h / 24);
     const label = days >= 1 ? days + "d" : Math.max(1, Math.round(h)) + "h";
-    btn.textContent = "UPDATE CATALOG (" + label + " old)";
-    btn.title = "Download latest rates for future usage; history remains unchanged";
+    btn.title = "Prices are " + label + " old. Download latest rates for future usage; history remains unchanged.";
     // A table older than a week is worth drawing attention to.
     btn.classList.toggle("unpriced", h > 24 * 7);
   }).catch(() => { /* backend not ready */ });

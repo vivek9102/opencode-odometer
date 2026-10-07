@@ -82,12 +82,16 @@
 
       <!-- bottom controls -->
       <div class="controls">
-        <button id="bd-toggle" class="ctl">TRIP / TOTAL</button>
-        <button id="bd-reset" class="ctl">RESET TRIP</button>
-        <button id="bd-update-prices" class="ctl" title="Download the latest catalog for future usage; history stays unchanged">UPDATE CATALOG</button>
-        <button id="bd-dock" class="ctl" title="Cycle dock position (F2)">DOCK</button>
-        <button id="bd-switch" class="ctl switch" title="Show cheaper models">MODELS</button>
-        <button id="bd-stop" class="ctl stop" title="Abort the active session in OpenCode">STOP SESSION</button>
+        <div class="controls-main">
+          <button id="bd-toggle" class="ctl">TRIP / TOTAL</button>
+          <button id="bd-reset" class="ctl">RESET TRIP</button>
+          <button id="bd-update-prices" class="ctl" title="Download the latest catalog for future usage; history stays unchanged">UPDATE CATALOG</button>
+          <button id="bd-dock" class="ctl" title="Cycle dock position (F2)">DOCK</button>
+        </div>
+        <div class="controls-session">
+          <button id="bd-switch" class="ctl switch" title="Show cheaper models">MODELS</button>
+          <button id="bd-stop" class="ctl stop" title="Abort the active session in OpenCode">STOP SESSION</button>
+        </div>
       </div>
       <div class="utility-row">
         <div class="utility-group"><button id="bd-export" class="ctl utility">EXPORT CSV</button><button id="bd-unpriced" class="ctl unpriced hidden" title="Review estimated or unknown model prices"></button></div>

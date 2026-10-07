@@ -45,6 +45,8 @@ they return token usage. Odometer can price that usage locally. See
 - **Settings** has Start with OpenCode, idle dimming, optional outside-click collapse,
   and enforcement pause. Pausing keeps counting spend and resumes the same budget period.
   Settings and Hide to tray sit together at the bottom-right of the board.
+  Models and Stop Session stay together on the right of the main action row.
+  Hover over Update Catalog to see the age of its prices.
   A single Review prices button opens estimated and unknown pricing details.
 - **Stop Session** cancels the active chat and its delegated work with one click,
   and waits for OpenCode's acknowledgement. Other chats keep running. Restart
@@ -242,6 +244,9 @@ the cap. Free turns and their tools use no grace; the existing spend stays
 visible. Switching back to a paid model respects the exhausted limit, including
 paid delegated work. Unknown prices do not qualify as free. The plugin uses
 Odometer's pricing classification rather than treating zero SDK rates as free.
+Returning to a paid model while the limit is exhausted shows the limit
+notification again and cancels that request before provider dispatch. Choose
+a free model or raise the limit to resume in the same chat.
 
 ## Switching models
 

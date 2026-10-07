@@ -39,7 +39,25 @@ async function freePort(){const server=createServer();await new Promise(r=>serve
  const model={limit:{context:10000,output:100},cost:{input:1,output:1}};
  writeFileSync(join(config,'opencode.json'),JSON.stringify({autoupdate:false,model:'smoke/default',small_model:'smoke/default',permission:{read:'allow'},agent:{build:{model:'smoke/default'}},plugin:[plugin.replaceAll('\\','/')],enabled_providers:['smoke'],provider:{smoke:{npm:'@ai-sdk/openai-compatible',name:'Local smoke',options:{baseURL:`http://127.0.0.1:${provider.address().port}/v1`,apiKey:'local-test-only'},models:{default:{...model,name:'Default'},selected:{...model,name:'Selected',...(freeBudget ? {cost:{input:0,output:0}} : {})}}}}}));
  const env={...process.env,OPENCODE_TEST_HOME:join(root,'home'),XDG_CONFIG_HOME:join(root,'xdg-config'),XDG_DATA_HOME:join(root,'xdg-data'),XDG_CACHE_HOME:join(root,'xdg-cache'),XDG_STATE_HOME:join(root,'xdg-state'),OPENCODE_CONFIG_DIR:config,OPENCODE_DISABLE_PROJECT_CONFIG:'1',OPENCODE_DISABLE_MODELS_FETCH:'1',OPENCODE_DISABLE_DEFAULT_PLUGINS:'1',OPENCODE_ODOMETER_DIR:data,OPENCODE_ODOMETER_HOME:data,OPENCODE_ODOMETER_POINTER:join(data,'pointer.json'),OPENCODE_ODOMETER_SERVER_POINTER:join(data,'server.json')};
- let child,base,logs='';
+ let child,base,logs='',eventController,eventTask;
+ const events=[];
+ async function watchEvents(){
+  eventController=new AbortController();
+  const response=await fetch(base+'/event',{signal:eventController.signal});
+  assert.ok(response.ok);
+  eventTask=(async()=>{
+   let buffer='';const decoder=new TextDecoder();
+   for await(const chunk of response.body){
+    buffer+=decoder.decode(chunk,{stream:true});
+    let end;while((end=buffer.indexOf('\n'))>=0){
+     const line=buffer.slice(0,end).trim();buffer=buffer.slice(end+1);
+     if(line.startsWith('data: '))events.push(JSON.parse(line.slice(6)));
+    }
+   }
+  })().catch(error=>{if(!eventController.signal.aborted)throw error});
+ }
+ const limitToasts=()=>events.filter(e=>e.type==='tui.toast.show'&&/limit|budget|hard stop/i.test(e.properties?.title||''));
+ async function waitForToasts(count){for(let n=0;n<100&&limitToasts().length<count;n++)await wait(20);assert.equal(limitToasts().length,count,'limit snackbar missing or duplicated');}
  async function start(){
   const port=await freePort();base=`http://127.0.0.1:${port}`;
   child=spawn(exe,['serve','--hostname','127.0.0.1','--port',String(port),'--print-logs','--log-level','DEBUG'],{cwd:root,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
@@ -61,6 +79,7 @@ async function freePort(){const server=createServer();await new Promise(r=>serve
   await start();const firstPID=child.pid;
   const chat=await api('/session',{title:'Model routing smoke'}),other=await api('/session',{title:'Other chat'});
   if(freeBudget){
+   await watchEvents();
    await prompt(other.id); // Warm OpenCode's isolated project before testing hooks.
    const budget={enabled:true,updated:Date.now()/1000,mode:'hard',free_models:['smoke/selected'],sessions:{[chat.id]:{state:'over',enforced:true,cost:2,limit:1,fraction:2,past_hard_stop:true}}};
    const budgetFile=join(data,'budget.json');writeFileSync(budgetFile,JSON.stringify(budget));queue(chat.id,'free-after-limit');
@@ -69,12 +88,21 @@ async function freePort(){const server=createServer();await new Promise(r=>serve
    const reads=messages.flatMap(m=>m.parts||[]).filter(p=>p.type==='tool'&&p.tool==='read');
    assert.ok(reads.some(p=>p.state?.status==='completed'),'free tool was blocked by the exhausted budget');
    const later=await prompt(chat.id);assert.equal(later.info.modelID,'selected');assert.equal(later.info.error,undefined);
-   const callsBefore=requested.length;queue(chat.id,'back-to-paid','smoke/default');
-   try{await prompt(chat.id)}catch{/* a blocked prompt can close without a JSON response */}
+   const callsBefore=requested.length,toastsBefore=limitToasts().length;queue(chat.id,'back-to-paid','smoke/default');
+   const blocked=await prompt(chat.id);
+   assert.equal(blocked.info.error?.name,'MessageAbortedError','budget refusal escaped OpenCode response handling');
+   assert.ok(blocked.info.error.data.message.includes('Choose a free model'));
+   await waitForToasts(toastsBefore+1);
+   const blockedAgain=await prompt(chat.id);assert.equal(blockedAgain.info.error?.name,'MessageAbortedError');
+   await waitForToasts(toastsBefore+2);
    assert.equal(requested.length,callsBefore,'a paid model reached the provider after the exhausted limit');
    queue(chat.id,'free-again');const recovered=await prompt(chat.id);assert.equal(recovered.info.modelID,'selected');assert.equal(recovered.info.error,undefined,'blocked paid request broke the chat');
    const after=JSON.parse(readFileSync(budgetFile));assert.equal(after.enabled,true);assert.equal(after.sessions[chat.id].cost,2);assert.equal(after.sessions[chat.id].limit,1);
-   const result={success:true,freeAfterLimit:true,freeToolCompleted:true,laterFreeTurn:true,paidBlocked:true,freeAfterBlockedPaid:true,budgetPreserved:true,providerRequests:requested};writeFileSync(join(root,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));return;
+   queue(chat.id,'paid-after-raise','smoke/default');budget.sessions[chat.id]={state:'ok',enforced:true,cost:2,limit:5,fraction:.4,past_hard_stop:false};writeFileSync(budgetFile,JSON.stringify(budget));
+   const resumed=await prompt(chat.id);assert.equal(resumed.info.modelID,'default');assert.equal(resumed.info.error,undefined,'raising the limit did not resume paid work');
+   const untouched=await prompt(other.id);assert.equal(untouched.info.modelID,'default');assert.equal(untouched.info.error,undefined);
+   assert.equal(child.exitCode,null,'OpenCode exited on a refused paid request');
+   const result={success:true,freeAfterLimit:true,freeToolCompleted:true,laterFreeTurn:true,paidBlocked:true,handledCancellation:true,repeatSnackbar:true,freeAfterBlockedPaid:true,budgetPreserved:true,paidAfterRaise:true,otherChatUntouched:true,providerRequests:requested};writeFileSync(join(root,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));return;
   }
   queue(chat.id,'restart-choice');
   await stop();await start();assert.notEqual(child.pid,firstPID);
@@ -97,5 +125,5 @@ async function freePort(){const server=createServer();await new Promise(r=>serve
   const following=await prompt(chat.id);assert.equal(following.info.modelID,'default');
   const result={success:true,restarted:true,firstPID,nextPID:child.pid,otherChat:otherResult.info.modelID,nextTurn:selected.info.modelID,laterTurn:later.info.modelID,resumedTurn:resumed.info.modelID,replacedTurn:replaced.info.modelID,followOpenCode:following.info.modelID,confirmed:true,providerRequests:requested};
   writeFileSync(join(root,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
- }finally{await stop();writeFileSync(join(root,'console.log'),logs);provider.closeAllConnections();await new Promise(r=>provider.close(r));}
+ }finally{eventController?.abort();await eventTask;await stop();writeFileSync(join(root,'console.log'),logs);provider.closeAllConnections();await new Promise(r=>provider.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1});
