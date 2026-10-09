@@ -2,6 +2,14 @@
 
 Open TUI budgets and the compact aggregate dock have been reviewed. The local review build is `build/bin/OpenCode_Odometer-preview-flows.exe`.
 
+## Screenshots
+
+These screenshots show the current frontend with demo data. The full gallery, including all four dock states, is in the [README](../README.md#screenshots).
+
+![Expanded panel with the global odometer, open sessions, model usage and selected-session controls](screenshots/expanded.png)
+
+![Dock warning with the full session identity and budget percentage](screenshots/docked-warning.png)
+
 ## Behaviour
 
 - Each newly opened OpenCode TUI registers immediately, including the home screen before the first chat. It gets a stable name such as `keen-robin-c22b85c4`, shown on a separate row in the TUI, its terminal title and the Odometer list. The former folder prefix is unnecessary for uniqueness and is omitted from new names. Naming makes no model request.
@@ -19,7 +27,7 @@ Open TUI budgets and the compact aggregate dock have been reviewed. The local re
 
 ## Review steps
 
-1. Inspect `build/multi-session-ui/expanded.png` and the `docked-*.png` screenshots. These show the actual frontend with synthetic session data.
+1. Inspect the [screenshot gallery](../README.md#screenshots). The tracked images are in `docs/screenshots/`; running the browser smoke refreshes their originals in `build/multi-session-ui/`. These show the actual frontend with synthetic session data.
 2. Close the currently running Odometer, then launch `build/bin/OpenCode_Odometer-preview-flows.exe` from File Explorer. Codex's binary-file preview does not launch an executable. Alternatively, use PowerShell: `& '.\build\bin\OpenCode_Odometer-preview-flows.exe'`. This uses the normal single-instance lock. Its first launch installs the companion and registers it in OpenCode's TUI configuration.
 3. Restart OpenCode, opening two or more TUIs. Each should appear before a prompt is sent, with its name on both sides. A terminal host that ignores application titles may keep its own tab label; the name is still visible inside OpenCode.
 4. Set a cap on one row, select another and confirm it has no cap. Try checking ENABLE with an empty amount, entering a cap, hard/soft modes, STOP, independent scrolling and closing one TUI. Review the one-TUI layout as well.

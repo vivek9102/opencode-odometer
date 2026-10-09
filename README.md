@@ -18,6 +18,25 @@ installs its own plugin on first run.
 > `internal/lock` already has a Unix implementation; the gaps are in window
 > placement and packaging. See [Contributing](#contributing).
 
+## Screenshots
+
+The current app UI, shown with demo sessions and spending data.
+
+The expanded panel combines global usage with open sessions and controls for the selected session:
+
+![Expanded OpenCode Odometer panel showing open sessions, model usage and the selected session's budget](docs/screenshots/expanded.png)
+
+The compact dock stays at 340 × 46 and totals spending across open sessions:
+
+| State | Dock |
+|---|---|
+| Limits set, all within budget | ![Green dock with the open session count and all within budget summary](docs/screenshots/docked-ok.png) |
+| No limits set | ![Dock showing the open session count and no limits summary](docs/screenshots/docked-no-limit.png) |
+| A session reaches 75% | ![Amber dock showing the full session name, 82 percent usage and the budget edge](docs/screenshots/docked-warning.png) |
+| A session exceeds its budget | ![Red dock showing the full session name and spending against its limit](docs/screenshots/docked-over.png) |
+
+See [session behaviour and review steps](docs/MULTI_SESSION.md) for details.
+
 ---
 
 ## Why not just use `opencode stats`?
