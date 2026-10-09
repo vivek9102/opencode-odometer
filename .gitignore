@@ -9,8 +9,10 @@ grace_claims.json
 grace_claims.json.*
 events.jsonl
 models-*.json
+tui-*.json
 switch-*.json
 abort-*.json
+stop-tui-*.json
 preferences.json
 launch-suppressed.json
 *.log

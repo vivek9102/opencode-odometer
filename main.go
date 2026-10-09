@@ -68,6 +68,15 @@ func executablePath() string {
 }
 
 func main() {
+	// Wails runs a bindings-tagged executable during builds. Reflection must
+	// work while the live widget holds its lock, without installing plugins
+	// or touching the user's ledger/configuration.
+	if bindingsBuild {
+		if err := wails.Run(&options.App{Bind: []interface{}{wservice.New()}}); err != nil {
+			log.Fatalf("bindings: %v", err)
+		}
+		return
+	}
 	dir := dataDir()
 	logPath := filepath.Join(dir, "opencode_odometer_events.log")
 	logMsg := func(format string, args ...any) {
@@ -124,14 +133,15 @@ func main() {
 			opencodeURL = os.Getenv("OPENCODE_SERVER_URL")
 		}
 		return app.Config{
-			PricesFile:  pricesPath,
-			OverlayFile: overlay,
-			StateFile:   filepath.Join(dir, "odometer_state.json"),
-			BudgetFile:  filepath.Join(dir, "budget.json"),
-			GraceFile:   filepath.Join(dir, "grace_claims.json"),
-			LogFile:     logPath,
-			MaxMessages: 20000,
-			OpenCodeURL: opencodeURL,
+			PricesFile:       pricesPath,
+			OverlayFile:      overlay,
+			StateFile:        filepath.Join(dir, "odometer_state.json"),
+			BudgetFile:       filepath.Join(dir, "budget.json"),
+			GraceFile:        filepath.Join(dir, "grace_claims.json"),
+			LogFile:          logPath,
+			MaxMessages:      20000,
+			OpenCodeURL:      opencodeURL,
+			OpenSessionsOnly: true,
 		}
 	}
 
@@ -155,7 +165,7 @@ func main() {
 
 	err = wails.Run(&options.App{
 		Title:            "OpenCode Odometer",
-		Width:            360,
+		Width:            340,
 		Height:           46,
 		Frameless:        true,
 		AlwaysOnTop:      true,

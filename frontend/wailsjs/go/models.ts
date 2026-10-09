@@ -80,6 +80,54 @@ export namespace app {
 	        this.persistent = source["persistent"];
 	    }
 	}
+	export class OpenSessionRow {
+	    id: string;
+	    name: string;
+	    pid: number;
+	    started: number;
+	    updated: number;
+	    session_id: string;
+	    model: string;
+	    active: boolean;
+	    closed: boolean;
+	    cost: number;
+	    spent: number;
+	    enabled: boolean;
+	    limit: number;
+	    mode: string;
+	    state: string;
+	    fraction: number;
+	    grace_remaining: number;
+	    past_hard_stop: boolean;
+	    enforced: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new OpenSessionRow(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.pid = source["pid"];
+	        this.started = source["started"];
+	        this.updated = source["updated"];
+	        this.session_id = source["session_id"];
+	        this.model = source["model"];
+	        this.active = source["active"];
+	        this.closed = source["closed"];
+	        this.cost = source["cost"];
+	        this.spent = source["spent"];
+	        this.enabled = source["enabled"];
+	        this.limit = source["limit"];
+	        this.mode = source["mode"];
+	        this.state = source["state"];
+	        this.fraction = source["fraction"];
+	        this.grace_remaining = source["grace_remaining"];
+	        this.past_hard_stop = source["past_hard_stop"];
+	        this.enforced = source["enforced"];
+	    }
+	}
 	export class Preferences {
 	    auto_start: boolean;
 	    auto_collapse: boolean;
@@ -347,6 +395,10 @@ export namespace wservice {
 	    }
 	}
 	export class Snapshot {
+	    open_sessions: app.OpenSessionRow[];
+	    selected_session: string;
+	    open_cost: number;
+	    open_rate: number;
 	    view: string;
 	    cost: number;
 	    saved: number;
@@ -397,6 +449,10 @@ export namespace wservice {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.open_sessions = this.convertValues(source["open_sessions"], app.OpenSessionRow);
+	        this.selected_session = source["selected_session"];
+	        this.open_cost = source["open_cost"];
+	        this.open_rate = source["open_rate"];
 	        this.view = source["view"];
 	        this.cost = source["cost"];
 	        this.saved = source["saved"];

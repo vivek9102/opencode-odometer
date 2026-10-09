@@ -14,6 +14,7 @@
       <div id="bar-rate">$0.00/hr</div>
       <div id="bar-model">idle</div>
     </div>
+	<div id="bar-edge" class="hidden"><i></i></div>
     <span id="bar-unpriced" class="bar-warn hidden" title="Some models have no price - spend is not being counted">!</span>
     <button id="bar-expand" class="bar-btn" title="Open spending details" aria-label="Open spending details">&#9650;</button>
   </div>
@@ -25,6 +26,7 @@
     <div class="fixed-head-region">
       <div class="head drag">
         <span id="bd-mode" class="mode">TRIP</span><button id="bd-reading" class="text-btn" title="Toggle spent / remaining">spent</button>
+		<button id="bd-toggle" class="ctl">TRIP / TOTAL</button><button id="bd-reset" class="ctl">RESET TRIP</button>
         <span id="bd-status" class="status">saved $0.0000</span>
         <span id="bd-conn" class="conn" title="OpenCode connection">connecting</span>
         <button id="bd-collapse" class="text-btn">&#9660; collapse</button>
@@ -41,7 +43,9 @@
       </div>
     </div>
 
-    <!-- Scrollable Middle Region: per-model table -->
+	<section class="sessions-section"><div class="section-heading"><span>OPEN SESSIONS</span><span id="session-count"></span></div><div id="session-list" role="list" aria-label="Open OpenCode sessions"></div></section>
+	<div class="section-heading"><span>MODEL USAGE</span><span>global · independent of selection</span></div>
+    <!-- Independently scrollable per-model table -->
     <div id="bd-table-wrap" class="table-wrap">
       <table id="bd-table">
         <thead>
@@ -63,11 +67,11 @@
       <div class="activity-row"><svg id="bd-spark" viewBox="0 0 260 24" role="img" aria-label="Recent spending"><polyline /></svg><span>last 10 min</span><span id="pause-status" class="hidden">Enforcement paused</span></div>
       <!-- session budget row -->
       <div class="budget-row">
-        <label class="chk" title="Applies to each chat separately, not to your total spend."><input type="checkbox" id="bd-enabled" /> LIMIT PER CHAT</label>
+        <div class="limit-heading">LIMIT FOR <strong id="selected-name">—</strong></div>
+        <label class="chk limit-enabled" title="Enable a limit for this session only."><input type="checkbox" id="bd-enabled" /> ENABLE</label>
         <span class="dollar">$</span>
         <input type="text" id="bd-limit" class="limit" />
         <select id="bd-mode-sel">
-          <option value="warn">warn</option>
           <option value="soft">soft</option>
           <option value="hard">hard</option>
         </select>
@@ -78,24 +82,18 @@
           </div>
         </div>
         <span id="bd-budget-label" class="budget-label">off</span>
+		<button id="bd-stop" class="ctl stop" title="Cancel selected session">STOP SESSION</button>
       </div>
+	  <div id="session-limit-note" class="session-note">New sessions have no limit. Set a limit for the selected session only.</div>
 
-      <!-- bottom controls -->
-      <div class="controls">
-        <div class="controls-main">
-          <button id="bd-toggle" class="ctl">TRIP / TOTAL</button>
-          <button id="bd-reset" class="ctl">RESET TRIP</button>
-          <button id="bd-update-prices" class="ctl" title="Download the latest catalog for future usage; history stays unchanged">UPDATE CATALOG</button>
-          <button id="bd-dock" class="ctl" title="Cycle dock position (F2)">DOCK</button>
-        </div>
-        <div class="controls-session">
-          <button id="bd-switch" class="ctl switch" title="Show cheaper models">MODELS</button>
-          <button id="bd-stop" class="ctl stop" title="Abort the active session in OpenCode">STOP SESSION</button>
-        </div>
-      </div>
       <div class="utility-row">
-        <div class="utility-group"><button id="bd-export" class="ctl utility">EXPORT CSV</button><button id="bd-unpriced" class="ctl unpriced hidden" title="Review estimated or unknown model prices"></button></div>
-        <div class="utility-group"><button id="bd-settings" class="ctl">SETTINGS</button><button id="bd-hide" class="ctl">HIDE TO TRAY</button></div>
+		<button id="bd-export" class="ctl utility">EXPORT CSV</button>
+		<button id="bd-update-prices" class="ctl" title="Download the latest catalog for future usage; history stays unchanged">UPDATE CATALOG</button>
+		<button id="bd-unpriced" class="ctl" title="Review estimated or unknown model prices">REVIEW PRICES</button>
+		<button id="bd-switch" class="ctl switch" title="Models for the selected session">MODELS</button>
+		<button id="bd-settings" class="ctl">SETTINGS</button>
+		<button id="bd-dock" class="ctl" title="Collapse to the dock (F2 cycles its position)">DOCK</button>
+		<button id="bd-hide" class="ctl">HIDE</button>
       </div>
     </div>
   </div>
@@ -206,6 +204,7 @@
   <!-- mode tooltip -->
   <div id="tip" class="tooltip hidden"></div>
 
+  <script src="sessions.js"></script>
   <script src="main.js"></script>
   <script src="experience.js"></script>
 </body>

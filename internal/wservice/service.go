@@ -61,16 +61,20 @@ type ModelOption struct {
 
 // Snapshot is the full UI state the frontend renders on each refresh.
 type Snapshot struct {
-	View      string  `json:"view"`
-	Cost      float64 `json:"cost"`
-	Saved     float64 `json:"saved"`
-	TripCost  float64 `json:"trip_cost"`
-	TotalCost float64 `json:"total_cost"`
-	Rate      float64 `json:"rate"`
-	Model     string  `json:"model"`
-	Tokens    int64   `json:"tokens"`
-	Seeded    bool    `json:"seeded"`
-	Active    bool    `json:"active"`
+	OpenSessions    []app.OpenSessionRow `json:"open_sessions"`
+	SelectedSession string               `json:"selected_session"`
+	OpenCost        float64              `json:"open_cost"`
+	OpenRate        float64              `json:"open_rate"`
+	View            string               `json:"view"`
+	Cost            float64              `json:"cost"`
+	Saved           float64              `json:"saved"`
+	TripCost        float64              `json:"trip_cost"`
+	TotalCost       float64              `json:"total_cost"`
+	Rate            float64              `json:"rate"`
+	Model           string               `json:"model"`
+	Tokens          int64                `json:"tokens"`
+	Seeded          bool                 `json:"seeded"`
+	Active          bool                 `json:"active"`
 
 	BudgetEnabled bool    `json:"budget_enabled"`
 	Limit         float64 `json:"limit"`
@@ -155,6 +159,8 @@ type Service struct {
 	alertMu          sync.Mutex
 	alertActive      bool
 	alertPrevCompact bool
+	selectionMu      sync.Mutex
+	selectedSession  string
 }
 
 // Dimensions of the budget alert window, mirroring the original dialog.
@@ -306,7 +312,7 @@ func (s *Service) snapshot() *Snapshot {
 		idleFor = time.Since(seen).Round(time.Second).String()
 	}
 
-	return &Snapshot{
+	snap := &Snapshot{
 		View: view, Cost: viewCost, Saved: viewSaved,
 		TripCost: tripCost, TotalCost: totalCost,
 		Rate:  a.BurnRate(),
@@ -327,6 +333,79 @@ func (s *Service) snapshot() *Snapshot {
 		Dock:            a.Dock(), Docked: a.DockMode(), Compact: s.appCompact, Rows: rows,
 		Preferences: a.Preferences(), Charge: a.LastCharge(), Charges: a.RecentCharges(), Sparkline: a.RecentSpend(), Peek: s.peek,
 	}
+	openRows := a.OpenSessions()
+	s.selectionMu.Lock()
+	selected := s.selectedSession
+	found := false
+	for _, row := range openRows {
+		if row.ID == selected {
+			found = true
+		}
+	}
+	if !found {
+		selected = ""
+		if len(openRows) > 0 {
+			selected = openRows[0].ID
+		}
+		s.selectedSession = selected
+	}
+	s.selectionMu.Unlock()
+	snap.OpenSessions, snap.SelectedSession = openRows, selected
+	snap.SessionCount = len(openRows)
+	snap.OpenCost, snap.OpenRate = a.OpenSessionTotals(openRows)
+	for _, row := range openRows {
+		if row.ID == selected {
+			snap.SessionID, snap.SessionCost, snap.Limit, snap.Mode = row.SessionID, row.Cost, row.Limit, row.Mode
+			snap.BudgetEnabled, snap.BudgetState, snap.Fraction, snap.Enforced = row.Enabled, row.State, row.Fraction, row.Enforced
+			snap.Exceeded, snap.GraceRemaining, snap.PastHardStop = row.State == "over", row.GraceRemaining, row.PastHardStop
+			snap.WarnAt = .75
+		}
+	}
+	return snap
+}
+
+// SelectOpenSession changes footer/model-picker targeting without navigation.
+func (s *Service) SelectOpenSession(id string) error {
+	if s.App == nil {
+		return fmt.Errorf("app not initialized")
+	}
+	for _, row := range s.App.OpenSessions() {
+		if row.ID == id {
+			s.selectionMu.Lock()
+			s.selectedSession = id
+			s.selectionMu.Unlock()
+			s.refresh()
+			return nil
+		}
+	}
+	return fmt.Errorf("this OpenCode TUI has closed")
+}
+
+func (s *Service) SetOpenSessionBudget(id string, limit float64, mode string, enabled bool) error {
+	if s.App == nil {
+		return fmt.Errorf("app not initialized")
+	}
+	if err := s.App.SetOpenSessionBudget(id, limit, mode, enabled); err != nil {
+		return err
+	}
+	s.refresh()
+	return nil
+}
+func (s *Service) IncreaseOpenSessionBudget(id string, amount float64) error {
+	if s.App == nil {
+		return fmt.Errorf("app not initialized")
+	}
+	if err := s.App.IncreaseOpenSessionBudget(id, amount); err != nil {
+		return err
+	}
+	s.refresh()
+	return nil
+}
+func (s *Service) StopOpenSession(id string) error {
+	if s.App == nil {
+		return fmt.Errorf("app not initialized")
+	}
+	return s.App.RequestOpenSessionAbort(id)
 }
 
 // budgetLabel renders the budget readout, mirroring the original: it states
@@ -545,6 +624,15 @@ func (s *Service) AvailableModels() []ModelOption {
 		return []ModelOption{}
 	}
 	current := s.App.Ledger.ActiveModel()
+	s.selectionMu.Lock()
+	selected := s.selectedSession
+	s.selectionMu.Unlock()
+	for _, row := range s.App.OpenSessions() {
+		if row.ID == selected {
+			current = row.Model
+			break
+		}
+	}
 	alts := s.App.ModelChoices(current)
 	out := make([]ModelOption, 0, len(alts))
 	for _, a := range alts {
@@ -1230,16 +1318,16 @@ func flip(v string) string {
 
 func windowWidth(compact bool) int {
 	if compact {
-		return 360
+		return 340
 	}
-	return 620
+	return 800
 }
 
 func windowHeight(compact bool) int {
 	if compact {
 		return 46
 	}
-	return 580
+	return 780
 }
 
 // dataDir mirrors the main package's data location so exports land beside the

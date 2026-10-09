@@ -25,19 +25,22 @@ import (
 
 // RatePoint records spend delta at a point in time for live burn rate calculation.
 type RatePoint struct {
-	Time time.Time
-	Cost float64
+	Time      time.Time
+	Cost      float64
+	MessageID string
 }
 
 // State is the persisted odometer_state.json payload: the ledger plus the
 // budget bookkeeping.
 type State struct {
-	Ledger          *ledger.Store      `json:"ledger"`
-	BudgetBaselines map[string]float64 `json:"budget_baselines"`
-	SessionParents  map[string]string  `json:"session_parents,omitempty"`
-	BudgetAllow     map[string]float64 `json:"budget_allow"`
-	GraceUsed       map[string]int     `json:"grace_used"`
-	SeenModels      map[string]bool    `json:"seen_models,omitempty"`
+	Ledger           *ledger.Store         `json:"ledger"`
+	BudgetBaselines  map[string]float64    `json:"budget_baselines"`
+	SessionParents   map[string]string     `json:"session_parents,omitempty"`
+	OpenSessionsMode bool                  `json:"open_sessions_mode,omitempty"`
+	OpenPolicies     map[string]OpenPolicy `json:"open_policies,omitempty"`
+	BudgetAllow      map[string]float64    `json:"budget_allow"`
+	GraceUsed        map[string]int        `json:"grace_used"`
+	SeenModels       map[string]bool       `json:"seen_models,omitempty"`
 	// IgnoredPrices are models the user chose not to price. Persisted because
 	// pricing re-flags an unknown model on every message, so a non-persistent
 	// dismissal would reappear on the next turn.
@@ -56,14 +59,15 @@ type State struct {
 
 // Config carries file paths into the app.
 type Config struct {
-	PricesFile  string
-	OverlayFile string
-	StateFile   string
-	BudgetFile  string
-	GraceFile   string
-	LogFile     string
-	MaxMessages int
-	OpenCodeURL string
+	PricesFile       string
+	OverlayFile      string
+	StateFile        string
+	BudgetFile       string
+	GraceFile        string
+	LogFile          string
+	MaxMessages      int
+	OpenCodeURL      string
+	OpenSessionsOnly bool
 }
 
 // Client is the subset of the OpenCode client the app needs. It is an
@@ -114,6 +118,7 @@ type App struct {
 	charged     map[string]bool
 	lastCharge  Charge
 	charges     []Charge
+	openTUIs    map[string]OpenTUI
 }
 
 // New loads prices, state and budget config.
@@ -169,6 +174,12 @@ func New(cfg Config) (*App, error) {
 	}
 	a.graceUsed = a.state.GraceUsed
 	a.loadState()
+	if cfg.OpenSessionsOnly {
+		a.state.OpenSessionsMode = true
+	}
+	if a.state.OpenSessionsMode {
+		a.RefreshOpenSessions()
+	}
 	// Repair records that an older classifier charged even though their model
 	// key is now recognized as free. Do not broadly reprice paid history here.
 	a.reclassifyFreeModels()
@@ -184,7 +195,7 @@ func New(cfg Config) (*App, error) {
 
 	// Republish restored verdicts immediately. For a fresh, unseeded ledger,
 	// PublishBudget skips writing, so publish its configuration directly.
-	if a.Seeded() {
+	if a.Seeded() || a.state.OpenSessionsMode {
 		a.PublishBudget()
 	} else if err := a.Contract.WriteBudget(plugin.BudgetFile{
 		FreeModels:        a.freeModelKeys(),
@@ -292,6 +303,8 @@ func (a *App) loadState() {
 	}
 	a.state.GraceUsed = st.GraceUsed
 	a.state.SessionParents = st.SessionParents
+	a.state.OpenSessionsMode = st.OpenSessionsMode
+	a.state.OpenPolicies = st.OpenPolicies
 	if a.state.GraceUsed == nil {
 		a.state.GraceUsed = map[string]int{}
 	}
@@ -396,13 +409,20 @@ func (a *App) SaveState() {
 		return
 	}
 
-	a.Ledger.Prune(a.cfg.MaxMessages)
+	a.mu.RLock()
+	keep := a.openRecordsLocked()
+	a.mu.RUnlock()
+	a.Ledger.PruneKeeping(a.cfg.MaxMessages, keep)
 
 	a.mu.Lock()
 	a.state.BudgetBaselines = a.baselinesLocked()
 	a.state.BudgetAllow = a.allowLocked()
 	a.state.GraceUsed = a.graceUsedLocked()
 	stCopy := a.state
+	stCopy.OpenPolicies = make(map[string]OpenPolicy, len(a.state.OpenPolicies))
+	for id, p := range a.state.OpenPolicies {
+		stCopy.OpenPolicies[id] = p
+	}
 	stCopy.SessionParents = make(map[string]string, len(a.state.SessionParents))
 	for sid, parent := range a.state.SessionParents {
 		stCopy.SessionParents[sid] = parent
@@ -590,7 +610,7 @@ func (a *App) ApplyMessage(m opencode.Message) bool {
 	gained := cost - prevCost
 	if gained > 0 && a.Seeded() {
 		a.rateMu.Lock()
-		a.rateWindow = append(a.rateWindow, RatePoint{Time: time.Now(), Cost: gained})
+		a.rateWindow = append(a.rateWindow, RatePoint{Time: time.Now(), Cost: gained, MessageID: m.ID})
 		a.rateMu.Unlock()
 	}
 
@@ -718,11 +738,16 @@ func (a *App) LastActivity() time.Time {
 // PublishBudget writes the verdict the plugin enforces on. Only recently
 // active sessions are published to keep the file bounded.
 func (a *App) PublishBudget() {
+	a.RefreshOpenSessions()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	// First fold in any grace claims the plugin recorded.
 	if _, err := a.Contract.AbsorbGraceClaims(a.graceUsed); err == nil {
+	}
+	if a.state.OpenSessionsMode {
+		a.publishOpenBudgetsLocked()
+		return
 	}
 	// Previously independent children may already have claimed grace.
 	// Fold these into the shared owner so discovering ancestry cannot grant

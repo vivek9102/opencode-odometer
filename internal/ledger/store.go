@@ -264,6 +264,12 @@ func clampEpsilon(v float64) float64 {
 // carried-forward base so lifetime totals stay correct. Returns the number
 // dropped.
 func (s *Store) Prune(max int) int {
+	return s.PruneKeeping(max, nil)
+}
+
+// PruneKeeping retains records needed to enforce live budgets. The ledger may
+// exceed max while protected conversations are open; closing releases them.
+func (s *Store) PruneKeeping(max int, keep map[string]bool) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -272,7 +278,9 @@ func (s *Store) Prune(max int) int {
 	}
 	ids := make([]string, 0, len(s.Messages))
 	for id := range s.Messages {
-		ids = append(ids, id)
+		if !keep[id] {
+			ids = append(ids, id)
+		}
 	}
 	// oldest first by (timestamp, mid) — stable, deterministic
 	sort.Slice(ids, func(i, j int) bool {
@@ -283,7 +291,10 @@ func (s *Store) Prune(max int) int {
 		return a.MID < b.MID
 	})
 
-	drop := len(ids) - max
+	drop := len(s.Messages) - max
+	if drop > len(ids) {
+		drop = len(ids)
+	}
 	for _, id := range ids[:drop] {
 		rec := s.Messages[id]
 		s.PrunedCost += rec.Cost

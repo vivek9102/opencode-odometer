@@ -31,6 +31,69 @@ func (a *App) RequestChatAbort(sid string) error {
 }
 
 func (a *App) requestChatAbort(sid string, timeout time.Duration) error {
+	return a.requestChatAbortAt(sid, 0, timeout)
+}
+
+func (a *App) RequestOpenSessionAbort(id string) error {
+	for _, row := range a.OpenSessions() {
+		if row.ID == id {
+			if row.SessionID == "" {
+				return fmt.Errorf("this TUI has no running conversation")
+			}
+			return a.stopOpenTUI(row)
+		}
+	}
+	return fmt.Errorf("this OpenCode TUI has closed")
+}
+
+func (a *App) stopOpenTUI(row OpenSessionRow) error {
+	requestID := uuid.NewString()
+	children := []string{}
+	a.mu.RLock()
+	for sid := range a.state.SessionParents {
+		if sid != row.SessionID && budgetRoot(sid, a.state.SessionParents) == row.SessionID {
+			children = append(children, sid)
+		}
+	}
+	a.mu.RUnlock()
+	req := struct {
+		abortRequest
+		Children []string `json:"children"`
+	}{abortRequest: abortRequest{ID: requestID, SessionID: row.SessionID, Instance: row.ID, Issued: time.Now().Unix()}, Children: children}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(a.experienceDir(), "stop-tui-"+row.ID+".json")
+	statusFile := filepath.Join(a.experienceDir(), "abort-status-"+requestID+".json")
+	if err = atomicExperienceFile(target, raw); err != nil {
+		return err
+	}
+	defer os.Remove(target)
+	defer os.Remove(statusFile)
+	deadline := time.NewTimer(4 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(25 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-deadline.C:
+			return fmt.Errorf("OpenCode did not acknowledge Stop Session; press Esc in that TUI")
+		case <-tick.C:
+			var status abortStatus
+			raw, err := os.ReadFile(statusFile)
+			if err != nil || json.Unmarshal(raw, &status) != nil || status.ID != requestID {
+				continue
+			}
+			if status.Status != "stopped" {
+				return fmt.Errorf("%s", status.Detail)
+			}
+			return nil
+		}
+	}
+}
+
+func (a *App) requestChatAbortAt(sid string, preferredPID int, timeout time.Duration) error {
 	if sid == "" {
 		return fmt.Errorf("no active chat to stop")
 	}
@@ -40,6 +103,9 @@ func (a *App) requestChatAbort(sid string, timeout time.Duration) error {
 		var inv ModelInventory
 		b, err := os.ReadFile(file)
 		if err != nil || json.Unmarshal(b, &inv) != nil || inv.AbortProtocol < 1 || inv.PID <= 0 || inv.Instance == "" || time.Now().Unix()-inv.Updated > 30 {
+			continue
+		}
+		if preferredPID != 0 && inv.PID != preferredPID {
 			continue
 		}
 		for _, observed := range inv.Sessions {

@@ -17,6 +17,8 @@ export function ApplyPriceOverride(arg1:string,arg2:prices.Rate):Promise<void>;
 
 export function AvailableModels():Promise<Array<wservice.ModelOption>>;
 
+export function ClearModelSwitch(arg1:string):Promise<void>;
+
 export function ClearPriceOverrides():Promise<void>;
 
 export function CycleDock():Promise<string>;
@@ -33,9 +35,13 @@ export function ExportCsv():Promise<string>;
 
 export function HideToTray():Promise<void>;
 
+export function IncreaseOpenSessionBudget(arg1:string,arg2:number):Promise<void>;
+
 export function Minimise():Promise<void>;
 
 export function ModelSwitchStatus(arg1:string):Promise<app.ModelSwitch>;
+
+export function PendingModelSwitch(arg1:string):Promise<app.ModelSwitch>;
 
 export function PendingPriceSuggestions():Promise<Array<prices.PriceSuggestion>>;
 
@@ -59,6 +65,8 @@ export function ResetTrip():Promise<void>;
 
 export function SavePosition(arg1:number,arg2:number):Promise<void>;
 
+export function SelectOpenSession(arg1:string):Promise<void>;
+
 export function SetCompact(arg1:boolean):Promise<void>;
 
 export function SetContext(arg1:context.Context):Promise<void>;
@@ -70,6 +78,8 @@ export function SetEnabled(arg1:boolean):Promise<void>;
 export function SetLimit(arg1:number):Promise<void>;
 
 export function SetMode(arg1:string):Promise<void>;
+
+export function SetOpenSessionBudget(arg1:string,arg2:number,arg3:string,arg4:boolean):Promise<void>;
 
 export function SetPeek(arg1:boolean):Promise<void>;
 
@@ -89,11 +99,9 @@ export function Start():Promise<void>;
 
 export function Stop():Promise<void>;
 
+export function StopOpenSession(arg1:string):Promise<void>;
+
 export function SwitchModel(arg1:string,arg2:string):Promise<app.ModelSwitch>;
-
-export function PendingModelSwitch(arg1:string):Promise<app.ModelSwitch>;
-
-export function ClearModelSwitch(arg1:string):Promise<void>;
 
 export function ToggleDock():Promise<boolean>;
 

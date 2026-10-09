@@ -26,6 +26,10 @@ export function AvailableModels() {
   return window['go']['wservice']['Service']['AvailableModels']();
 }
 
+export function ClearModelSwitch(arg1) {
+  return window['go']['wservice']['Service']['ClearModelSwitch'](arg1);
+}
+
 export function ClearPriceOverrides() {
   return window['go']['wservice']['Service']['ClearPriceOverrides']();
 }
@@ -58,12 +62,20 @@ export function HideToTray() {
   return window['go']['wservice']['Service']['HideToTray']();
 }
 
+export function IncreaseOpenSessionBudget(arg1, arg2) {
+  return window['go']['wservice']['Service']['IncreaseOpenSessionBudget'](arg1, arg2);
+}
+
 export function Minimise() {
   return window['go']['wservice']['Service']['Minimise']();
 }
 
 export function ModelSwitchStatus(arg1) {
   return window['go']['wservice']['Service']['ModelSwitchStatus'](arg1);
+}
+
+export function PendingModelSwitch(arg1) {
+  return window['go']['wservice']['Service']['PendingModelSwitch'](arg1);
 }
 
 export function PendingPriceSuggestions() {
@@ -110,6 +122,10 @@ export function SavePosition(arg1, arg2) {
   return window['go']['wservice']['Service']['SavePosition'](arg1, arg2);
 }
 
+export function SelectOpenSession(arg1) {
+  return window['go']['wservice']['Service']['SelectOpenSession'](arg1);
+}
+
 export function SetCompact(arg1) {
   return window['go']['wservice']['Service']['SetCompact'](arg1);
 }
@@ -132,6 +148,10 @@ export function SetLimit(arg1) {
 
 export function SetMode(arg1) {
   return window['go']['wservice']['Service']['SetMode'](arg1);
+}
+
+export function SetOpenSessionBudget(arg1, arg2, arg3, arg4) {
+  return window['go']['wservice']['Service']['SetOpenSessionBudget'](arg1, arg2, arg3, arg4);
 }
 
 export function SetPeek(arg1) {
@@ -170,16 +190,12 @@ export function Stop() {
   return window['go']['wservice']['Service']['Stop']();
 }
 
+export function StopOpenSession(arg1) {
+  return window['go']['wservice']['Service']['StopOpenSession'](arg1);
+}
+
 export function SwitchModel(arg1, arg2) {
   return window['go']['wservice']['Service']['SwitchModel'](arg1, arg2);
-}
-
-export function PendingModelSwitch(arg1) {
-  return window['go']['wservice']['Service']['PendingModelSwitch'](arg1);
-}
-
-export function ClearModelSwitch(arg1) {
-  return window['go']['wservice']['Service']['ClearModelSwitch'](arg1);
 }
 
 export function ToggleDock() {

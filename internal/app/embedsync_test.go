@@ -26,4 +26,13 @@ func TestEmbeddedPluginMatchesSource(t *testing.T) {
 		t.Fatal("internal/app/odometer_plugin.js is out of date.\n" +
 			"Run: copy plugin\\odometer.js internal\\app\\odometer_plugin.js")
 	}
+	for name, body := range map[string][]byte{"odometer-tui.tsx": tuiSource, "tui-presence.js": presenceSource} {
+		raw, err := os.ReadFile(filepath.Join(root, "plugin", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != string(body) {
+			t.Fatalf("embedded %s is stale", name)
+		}
+	}
 }

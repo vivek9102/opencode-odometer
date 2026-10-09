@@ -20,6 +20,12 @@ import (
 //go:embed odometer_plugin.js
 var pluginSource []byte
 
+//go:embed odometer_tui.tsx
+var tuiSource []byte
+
+//go:embed tui_presence.js
+var presenceSource []byte
+
 // PluginFileName is the name the plugin must have inside the plugins dir.
 const PluginFileName = "odometer.js"
 
@@ -59,6 +65,9 @@ func (a *App) EnsurePlugin() PluginStatus {
 		return PluginStatus{Err: fmt.Errorf("cannot resolve home directory")}
 	}
 	path := filepath.Join(dir, PluginFileName)
+	if err := a.ensureTUIPlugin(dir); err != nil {
+		return PluginStatus{Path: path, Err: err}
+	}
 
 	want := sha256.Sum256(pluginSource)
 	if existing, err := os.ReadFile(path); err == nil {
@@ -80,4 +89,24 @@ func (a *App) EnsurePlugin() PluginStatus {
 	}
 	a.logEvent("plugin installed at %s (%s)", path, runtime.GOOS)
 	return PluginStatus{Path: path, Installed: true}
+}
+
+func (a *App) ensureTUIPlugin(dir string) error {
+	// OpenCode 1.14.39 needs an explicit TUI registration, independent of
+	// server plugin discovery. Place the companion beside tui.json.
+	target := filepath.Dir(dir)
+	files := map[string][]byte{
+		"odometer-tui.tsx": tuiSource,
+		"tui-presence.js":  presenceSource,
+	}
+	for name, body := range files {
+		path := filepath.Join(target, name)
+		if old, err := os.ReadFile(path); err == nil && string(old) == string(body) {
+			continue
+		}
+		if err := atomicExperienceFile(path, body); err != nil {
+			return err
+		}
+	}
+	return registerTUIPlugin(target, filepath.Join(target, "odometer-tui.tsx"))
 }

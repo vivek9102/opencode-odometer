@@ -12,6 +12,8 @@ rem directory, so the plugin and the seed price table are duplicated into
 rem internal\. A stale copy would be self-installed over a good one.
 echo Syncing embedded assets...
 copy /Y plugin\odometer.js internal\app\odometer_plugin.js >nul
+copy /Y plugin\odometer-tui.tsx internal\app\odometer_tui.tsx >nul
+copy /Y plugin\tui-presence.js internal\app\tui_presence.js >nul
 copy /Y prices.json internal\prices\seed_prices.json >nul
 
 rem Regenerate the app icon so build\appicon.png and build\windows\icon.ico

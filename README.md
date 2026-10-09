@@ -40,12 +40,22 @@ they return token usage. Odometer can price that usage locally. See
 
 ## Features
 
+- **Open TUI sessions only**: each newly opened terminal gets a readable unique
+  name before its first chat, shown inside OpenCode and in Odometer. Closed TUIs
+  leave the list and lose their cap. New entries have no default limit.
+- The 340 × 46 dock aggregates open-session spend and highlights the worst cap.
+  Healthy states show the session count and budget summary. Warnings and breaches show
+  the worst session's complete name, including its identifier; the tooltip lists all names.
+  Expand to edit the selected limit or STOP its chat. The panel has independent scrolling
+  for open sessions and global model usage; selecting a row targets its footer.
+  See [implementation and review steps](docs/MULTI_SESSION.md).
+
 - Starts as a compact bar; OpenCode auto-launch docks it bottom-centre above the taskbar.
   The widget stays on top when you switch windows; Hide to tray hides it explicitly.
 - **Settings** has Start with OpenCode, idle dimming, optional outside-click collapse,
   and enforcement pause. Pausing keeps counting spend and resumes the same budget period.
   Settings and Hide to tray sit together at the bottom-right of the board.
-  Models and Stop Session stay together on the right of the main action row.
+  Stop Session acts on the selected row from the limit footer.
   Hover over Update Catalog to see the age of its prices.
   A single Review prices button opens estimated and unknown pricing details.
 - **Stop Session** cancels the active chat and its delegated work with one click,
@@ -70,7 +80,7 @@ they return token usage. Odometer can price that usage locally. See
 - **Live odometer** — mechanical-style counter, TRIP (resettable) and TOTAL.
 - **Cache-aware pricing** — `input`, `output`, `cache_read` and `cache_write`
   priced separately, so cached tokens use the appropriate rate.
-- **Per-session budget**, tiered — `warn` / `soft` / `hard`. Counts only spend
+- **Per-open-session budget** — `soft` / `hard`, with an amber warning at 75%. Counts only spend
   *from the moment you enable it*, so switching it on never retroactively locks
   a session in progress.
 - **Blocks before the provider is called** — the plugin refuses the turn in

@@ -30,6 +30,11 @@ func TestEnsurePluginInstallsAndIsIdempotent(t *testing.T) {
 	if !strings.Contains(string(raw), "odometer") {
 		t.Error("written plugin does not look like the odometer plugin")
 	}
+	for _, name := range []string{"odometer-tui.tsx", "tui-presence.js", "tui.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("companion %s not installed: %v", name, err)
+		}
+	}
 
 	// Re-running must not rewrite an identical file: OpenCode watches this
 	// directory, so needless churn could trigger reloads.

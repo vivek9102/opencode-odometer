@@ -179,7 +179,7 @@ function budgetLabelTip(snap) {
   if (!snap.budget_enabled) return "Session limit is off.";
   const lines = ["The limit applies to this chat only. Each chat gets its own."];
   const others = (snap.session_count || 1) - 1;
-  if (others > 0) {
+  if (others > 0 && !Array.isArray(snap.open_sessions)) {
     lines.push(`${others} other chat${others > 1 ? "s" : ""}: $${(snap.other_cost || 0).toFixed(2)} (not counted here)`);
   }
   if (!snap.enforced) lines.push("", "Mode is 'warn' - nothing will be blocked.");
@@ -189,9 +189,12 @@ function budgetLabelTip(snap) {
 }
 
 function render(snap) {
+	 snap = selectedSnapshot(snap);
   snapshot = snap;
   document.body.classList.toggle("compact-mode", snap.compact);
-  renderExperience(snap);
+  const globalSnap = Array.isArray(snap.open_sessions) ? {...snap,budget_enabled:false,preferences:{...snap.preferences,remaining:false}} : snap;
+  renderExperience(globalSnap);
+  $("bd-reading").disabled = Array.isArray(snap.open_sessions);
 
   // compact bar
   renderOdometer($("bar-odometer"), "bar", snap);
@@ -200,6 +203,7 @@ function render(snap) {
   $("bar-rate").style.color = rate > 5 ? "var(--red)" : rate > 0 ? "#e4e4e7" : "var(--dim)";
   $("bar-model").textContent = snap.connected ? snap.model : "offline";
   $("bar-model").style.color = snap.connected ? "var(--dim)" : "var(--amber)";
+	 renderSessionDock(snap);
 
   // board
   $("bd-mode").textContent = snap.view;
@@ -209,7 +213,7 @@ function render(snap) {
     ? "no prices - spend not counted"
     : "saved $" + snap.saved.toFixed(4);
   $("bd-status").style.color = allSpendUnpriced(snap) ? "var(--amber)" : "";
-  renderOdometer($("bd-odometer"), "big", snap);
+  renderOdometer($("bd-odometer"), "big", globalSnap);
   $("bd-rate").textContent = "$" + rate.toFixed(2) + "/hr";
   $("bd-saved").textContent = "$" + snap.saved.toFixed(4);
   $("bd-tokens").textContent = human(snap.tokens);
@@ -229,11 +233,14 @@ function render(snap) {
   }
 
   // budget controls. Do not fight the user while they are typing.
-  $("bd-enabled").checked = !!snap.budget_enabled;
   const limitEl = $("bd-limit");
-  if (document.activeElement !== limitEl) limitEl.value = String(snap.limit);
   const modeSel = $("bd-mode-sel");
-  if (document.activeElement !== modeSel) modeSel.value = snap.mode;
+  if(Array.isArray(snap.open_sessions))renderOpenBudgetControls(snap);
+  else {
+    $("bd-enabled").checked = !!snap.budget_enabled;
+    if (document.activeElement !== limitEl) limitEl.value = String(snap.limit);
+    if (document.activeElement !== modeSel) modeSel.value = snap.mode;
+  }
   const band = budgetBand(snap);
   $("bd-budget-label").textContent = budgetLabelText(snap);
   $("bd-budget-label").title = budgetLabelTip(snap);
@@ -264,6 +271,7 @@ function render(snap) {
   $("bd-stop").title = sid
     ? `Abort the active session (${sid}) in OpenCode. Other sessions keep running.`
     : "Abort the active session in OpenCode.";
+	 renderOpenSessions(snap);
 
   // table
   const tb = $("bd-tbody");
@@ -361,17 +369,18 @@ function modeTipText() {
 }
 
 // ---- controls ----
-$("bar-expand").addEventListener("click", () => setView(true));
+$("bar-expand").addEventListener("click", expandSessions);
 $("bd-collapse").addEventListener("click", () => setView(false));
 
-$("bd-enabled").addEventListener("change", (e) => Svc().SetEnabled(e.target.checked));
+$("bd-enabled").addEventListener("change", (e) => Array.isArray(snapshot?.open_sessions)?saveOpenBudget(e.target.checked):Svc().SetEnabled(e.target.checked));
 $("bd-limit").addEventListener("change", (e) => {
   const v = parseFloat(e.target.value);
+  if(Array.isArray(snapshot?.open_sessions)){saveOpenBudget(true);return;}
   if (!isNaN(v) && v >= 0) Svc().SetLimit(v);
   else if (snapshot) e.target.value = String(snapshot.limit);
 });
 $("bd-limit").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
-$("bd-mode-sel").addEventListener("change", (e) => Svc().SetMode(e.target.value));
+$("bd-mode-sel").addEventListener("change", (e) => Array.isArray(snapshot?.open_sessions)?saveOpenBudget($("bd-enabled").checked):Svc().SetMode(e.target.value));
 $("bd-mode-sel").addEventListener("mouseenter", (e) => showTip(e, modeTipText()));
 $("bd-mode-sel").addEventListener("mouseleave", hideTip);
 
@@ -393,19 +402,18 @@ $("bd-update-prices").addEventListener("click", () => {
     .catch((err) => toast("Update failed: " + err, "over"));
 });
 $("bd-dock").addEventListener("click", () => {
-  const p = Svc().CycleDock();
-  if (p && p.then) p.then((d) => toast("Dock: " + d, "ok"));
+  setView(false);
 });
 
 let stoppingSession=false;
-async function stopSession(fromAdvice=false) {
+async function stopSession(fromAdvice=false,entryID=snapshot?.selected_session) {
   if(stoppingSession)return;
   stoppingSession=true;
   $("bd-stop").disabled=$("advice-stop").disabled=true;
-  toast("Stopping active chat…","warn");
-  try {await Svc().AbortCurrent();if(fromAdvice)closeAdvice();toast("OpenCode stopped the chat","ok");}
+  toast("Stopping selected session…","warn");
+  try {if(Array.isArray(snapshot?.open_sessions))await Svc().StopOpenSession(entryID);else await Svc().AbortCurrent();if(fromAdvice)closeAdvice();toast("OpenCode stopped the chat","ok");}
   catch(err){toast("Stop failed: "+err,"over");}
-  finally{stoppingSession=false;$("bd-stop").disabled=$("advice-stop").disabled=false;}
+  finally{stoppingSession=false;$("bd-stop").disabled=$("advice-stop").disabled=false;if(snapshot){renderOpenSessions(snapshot);renderSessionDock(snapshot);}}
 }
 $("bd-stop").addEventListener("click",()=>stopSession());
 $("bd-export").addEventListener("click", () => {
@@ -427,10 +435,11 @@ function refreshUnpriced() {
     const prices = list || [];
     const n = prices.filter((s) => s.needs_confirmation).length;
     const btn = $("bd-unpriced");
-    btn.classList.toggle("hidden", prices.length === 0);
+    btn.classList.remove("hidden");
+    btn.classList.toggle("unpriced", n > 0);
     btn.textContent = n > 0
       ? "REVIEW " + n + " PRICE" + (n===1 ? "" : "S")
-      : "MODEL PRICES";
+      : "REVIEW PRICES";
   }).catch(() => { /* backend not ready */ });
 }
 
@@ -907,6 +916,8 @@ $("advice-disable").addEventListener("click", () => {
 // Fire the advice screen on the crossing into "over", but only when something
 // is actually blocked: in warn mode nothing is refused, so a modal is noise.
 function checkAdvice(snap) {
+	// Open-session breaches remain actionable inline in the dock/panel.
+	if(Array.isArray(snap.open_sessions))return;
   // Ignore the first snapshots after launch. Startup seeding briefly reports
   // a session as over before baselines are rebased, and interrupting with a
   // modal (which also force-expands the window) on every start is wrong: the
@@ -964,9 +975,9 @@ function openMenu(x, y) {
     }));
     menu.appendChild(menuItem("Switch model", openModelModal));
     menu.appendChild(menuItem("Settings…", openSettings));
-    menu.appendChild(menuItem(snapshot?.preferences?.remaining ? "Show spent" : "Show remaining",toggleReading));
+    if(!Array.isArray(snapshot?.open_sessions))menu.appendChild(menuItem(snapshot?.preferences?.remaining ? "Show spent" : "Show remaining",toggleReading));
     // Opened deliberately, so show it inline rather than seizing the window.
-    menu.appendChild(menuItem("Budget details\u2026", () => openAdvice(false)));
+    menu.appendChild(menuItem("Budget details\u2026", () => Array.isArray(snapshot?.open_sessions)?expandSessions():openAdvice(false)));
     menu.appendChild(menuSep());
     menu.appendChild(menuItem("Hide to tray", () => {cancelPeek();Svc().HideToTray();}));
     menu.appendChild(menuItem("Quit", () => {
