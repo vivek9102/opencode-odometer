@@ -9,11 +9,11 @@
 <body>
   <!-- ===== COMPACT BAR ===== -->
   <div id="bar" class="view">
-    <div id="bar-odometer" class="odometer-box drag" title="Click: TRIP/TOTAL · Double click: expand · Right click: menu"></div>
+    <div id="bar-odometer" class="odometer-box drag" title="RUN · spending across currently open TUIs · Click to expand"></div>
     <div id="bar-side" class="drag">
       <div id="bar-rate">$0.00/hr</div>
       <div id="bar-model">idle</div>
-    </div>
+    </div><span id="bar-scope">RUN</span>
 	<div id="bar-edge" class="hidden"><i></i></div>
     <span id="bar-unpriced" class="bar-warn hidden" title="Some models have no price - spend is not being counted">!</span>
     <button id="bar-expand" class="bar-btn" title="Open spending details" aria-label="Open spending details">&#9650;</button>
@@ -26,7 +26,7 @@
     <div class="fixed-head-region">
       <div class="head drag">
         <span id="bd-mode" class="mode">TRIP</span><button id="bd-reading" class="text-btn" title="Toggle spent / remaining">spent</button>
-		<button id="bd-toggle" class="ctl">TRIP / TOTAL</button><button id="bd-reset" class="ctl">RESET TRIP</button>
+		<span id="counter-toggle" class="segments"><button class="ctl" data-counter="RUN">RUN</button><button class="ctl" data-counter="TRIP">TRIP</button><button class="ctl" data-counter="TOTAL">TOTAL</button></span><button id="bd-toggle" class="hidden">TRIP / TOTAL</button><button id="bd-reset" class="ctl">RESET TRIP</button>
         <span id="bd-status" class="status">saved $0.0000</span>
         <span id="bd-conn" class="conn" title="OpenCode connection">connecting</span>
         <button id="bd-collapse" class="text-btn">&#9660; collapse</button>
@@ -67,12 +67,11 @@
       <div class="activity-row"><svg id="bd-spark" viewBox="0 0 260 24" role="img" aria-label="Recent spending"><polyline /></svg><span>last 10 min</span><span id="pause-status" class="hidden">Enforcement paused</span></div>
       <!-- session budget row -->
       <div class="budget-row">
-        <div class="limit-heading">LIMIT FOR <strong id="selected-name">—</strong></div>
+        <div class="limit-heading">LIMIT FOR <strong id="selected-name">—</strong><span id="selected-stage"></span></div>
         <label class="chk limit-enabled" title="Enable a limit for this session only."><input type="checkbox" id="bd-enabled" /> ENABLE</label>
-        <span class="dollar">$</span>
+        <span class="dollar" id="bd-limit-kind">$</span>
         <input type="text" id="bd-limit" class="limit" />
-        <select id="bd-mode-sel">
-          <option value="soft">soft</option>
+        <select id="bd-mode-sel" class="hidden" aria-hidden="true" tabindex="-1">
           <option value="hard">hard</option>
         </select>
         <div class="budget-bar-wrap" title="">
@@ -82,9 +81,14 @@
           </div>
         </div>
         <span id="bd-budget-label" class="budget-label">off</span>
-		<button id="bd-stop" class="ctl stop" title="Cancel selected session">STOP SESSION</button>
+		<button id="bd-stop" class="ctl stop" title="Cancel current activity in the selected session, like Esc">STOP SESSION</button>
+      <div id="budget-rules" class="hidden">
+        <div class="rule-label">WHEN THE LIMIT IS REACHED</div>
+        <div id="rule-action" class="segments"><button class="ctl" data-rule="stop">Stop at limit</button><button class="ctl" data-rule="switch">Switch to a cheaper model…</button></div>
+        <div id="limit-choice-note" class="session-note" role="status"></div>
       </div>
-	  <div id="session-limit-note" class="session-note">New sessions have no limit. Set a limit for the selected session only.</div>
+      </div>
+	  <div id="session-limit-note" class="session-note">Selected session only · every limit is hard · no grace turn · changing the cap keeps counted spending.</div>
 
       <div class="utility-row">
 		<button id="bd-export" class="ctl utility">EXPORT CSV</button>
@@ -183,6 +187,22 @@
     </div>
   </div>
 
+  <div id="fallback-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <section class="modal-content fallback-dialog" role="dialog" aria-modal="true" aria-labelledby="fallback-title">
+      <div class="modal-header"><h3 id="fallback-title">Switch to a cheaper model</h3><button id="fallback-close" class="modal-close-btn" aria-label="Discard fallback changes">&times;</button></div>
+      <p id="fallback-subtitle" class="modal-sub"></p>
+      <div class="fallback-tools"><input id="fallback-search" type="search" placeholder="Search configured models" aria-label="Search configured models" /><select id="fallback-cost-filter" aria-label="Fallback cost filter"><option value="both">Free + cheaper</option><option value="free">Free</option><option value="all">All configured</option></select><select id="fallback-provider-filter" aria-label="Fallback provider filter"><option value="all">All providers</option></select></div>
+      <p id="fallback-count" class="modal-sub"></p>
+      <div id="fallback-models" class="model-list" aria-label="Configured fallback models"></div>
+      <div id="fallback-allowance"><label>Extra budget for <strong id="fallback-name"></strong> $ <input id="fallback-limit" class="limit" type="number" min="0.0001" step="0.01" aria-label="Extra budget for the fallback model" /></label><div id="fallback-then" class="segments"><span>After that</span><button data-then="stop">Stop</button><button data-then="go">Keep going</button></div></div>
+      <p id="fallback-free-note" class="session-note hidden">This model is free. No extra budget is needed.</p>
+      <p id="fallback-chain" class="session-note"></p>
+      <p id="fallback-result" class="session-note" role="status"></p>
+      <div class="fallback-footer"><button id="fallback-cancel" class="ctl">Cancel</button><button id="save-rule" class="ctl raise">Switch at limit</button></div>
+    </section>
+  </div>
+
   <div id="settings-modal" class="modal hidden">
     <div class="modal-backdrop"></div><div class="modal-content settings-box">
       <div class="modal-header"><h3>Settings</h3><button id="settings-close" class="modal-close-btn">&times;</button></div>
@@ -192,6 +212,7 @@
       <label><input id="pref-dim" type="checkbox" /> Quiet appearance while idle</label>
       <label><input id="pref-pause" type="checkbox" /> Pause budget enforcement</label>
       <p>Spend continues to count while paused. Resuming keeps the same budget period.</p>
+      <div class="metadata-settings"><strong>Model benchmark metadata</strong><p>Optional Artificial Analysis API key. Stored locally; never included in exports. Models without matched measurements show Not rated.</p><input id="metadata-key" type="password" autocomplete="off" placeholder="Artificial Analysis API key" /><button id="metadata-save" class="ctl">SAVE KEY</button><button id="metadata-refresh" class="ctl">REFRESH METADATA</button><span id="metadata-result" role="status"></span></div>
       <div id="settings-result" role="status"></div>
     </div>
   </div>
@@ -200,6 +221,7 @@
 
   <!-- budget warning toast -->
   <div id="toast" class="toast hidden"></div>
+  <div id="rule-toast" class="hidden" role="status"><span id="rule-toast-text"></span><div id="rule-toast-actions"></div></div>
 
   <!-- mode tooltip -->
   <div id="tip" class="tooltip hidden"></div>
@@ -207,5 +229,6 @@
   <script src="sessions.js"></script>
   <script src="main.js"></script>
   <script src="experience.js"></script>
+  <script src="budget-rules.js"></script>
 </body>
 </html>

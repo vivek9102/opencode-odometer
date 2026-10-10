@@ -29,6 +29,8 @@ node --check plugin/odometer.js
 node --check plugin/event-diagnostics.js
 node --check frontend/dist/main.js
 node --check frontend/dist/experience.js
+node --check frontend/dist/sessions.js
+node --check frontend/dist/budget-rules.js
 node --test plugin/*.test.mjs
 git diff --check
 ```
@@ -62,10 +64,14 @@ OpenCode or Odometer data.
   used only according to the accounting precedence documented in the README.
 - Messages are keyed by ID and updated as token usage arrives. Replayed history
   must not count twice or produce new live-charge animations.
-- Parent and delegated child sessions share budget spend and grace. Changing
+- Parent and delegated child sessions share budget spend. Changing
   an enabled cap, resetting TRIP or restarting must preserve that period.
-- Only Odometer writes `budget.json`. The plugin reads verdicts and records
-  grace claims separately. An expired heartbeat stops enforcement.
+- Only Odometer writes `budget.json`. Open-TUI policies are hard with no grace.
+  Strict model steps wait for preceding usage to be accounted before dispatch.
+  The legacy bridge's heartbeat expiry still disables enforcement.
+- Automatic fallback uses a generation-scoped stop/prepare/arm/continue
+  handshake. Manual STOP cancels that generation. Never retry a continuation
+  after uncertain delivery, or infer free pricing from a zero SDK price.
 - Plugin initialization must return its hooks before awaiting SDK discovery.
 - A saved model choice belongs to one chat and remains until replaced or
   cleared. Confirm it using the matching assistant response. OpenCode `/model`

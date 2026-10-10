@@ -151,7 +151,7 @@ func TestOpenSessionsIndependentBudgetsAndCleanup(t *testing.T) {
 	addOpenSpend(a, "m1", "chat-one", .8)
 	addOpenSpend(a, "m2", "chat-two", .3)
 	doc := openVerdicts(t, a)
-	if doc.Sessions["chat-one"].State != "warn" || doc.Sessions["chat-two"].Limit != 2 || doc.Sessions["chat-two"].Mode != "soft" {
+	if doc.Sessions["chat-one"].State != "warn" || doc.Sessions["chat-two"].Limit != 2 || doc.Sessions["chat-two"].Mode != "hard" {
 		t.Fatalf("independent verdicts: %+v", doc)
 	}
 	a.SetSessionParent("child", "chat-one")
@@ -227,15 +227,90 @@ func TestOpenSessionRestartHomeBindingAndExpiry(t *testing.T) {
 	e.Updated = time.Now().Add(-11 * time.Second).Unix()
 	raw, _ := json.Marshal(e)
 	os.WriteFile(filepath.Join(a.experienceDir(), "tui-home.json"), raw, 0600)
-	if rows := restarted.OpenSessions(); len(rows) != 0 {
-		t.Fatalf("expired TUI retained: %+v", rows)
+	if rows := restarted.OpenSessions(); len(rows) != 1 || !rows[0].Enabled {
+		t.Fatalf("heartbeat delay deleted a live allowance: %+v", rows)
 	}
-	if len(restarted.state.OpenPolicies) != 0 {
-		t.Fatal("expired TUI retained cap")
+	reportTUI(t, restarted, "home", "different-chat", true)
+	if rows := restarted.OpenSessions(); len(rows) != 0 || len(restarted.state.OpenPolicies) != 0 {
+		t.Fatal("closed TUI retained its allowance")
 	}
 	reportTUI(t, restarted, "fresh", "", false)
 	if rows := restarted.OpenSessions(); len(rows) != 1 || rows[0].Enabled {
 		t.Fatal("new TUI inherited cap")
+	}
+}
+
+func TestOpenBudgetStartsAtEnableAndPreservesHistory(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	reportTUI(t, a, "one", "chat-one", false)
+	addOpenSpend(a, "before", "chat-one", .24)
+	if err := a.SetOpenSessionBudget("one", .2, "hard", true); err != nil {
+		t.Fatal(err)
+	}
+	if r := a.OpenSessions()[0]; r.Cost != 0 || r.Spent != .24 || r.Stopped {
+		t.Fatalf("pre-enable usage exhausted allowance: %+v", r)
+	}
+	addOpenSpend(a, "after", "chat-one", .08)
+	if err := a.SetOpenSessionBudget("one", .3, "hard", true); err != nil {
+		t.Fatal(err)
+	}
+	if r := a.OpenSessions()[0]; r.Cost != .08 {
+		t.Fatalf("amount edit reset the period: %+v", r)
+	}
+	a.SetCompact(true)
+	a.SetSessionParent("child", "chat-one")
+	addOpenSpend(a, "child-after", "child", .04)
+	if v := openVerdicts(t, a).Sessions["child"]; v.Cost != .12 || v.Limit != .3 {
+		t.Fatalf("dock/child escaped selected allowance: %+v", v)
+	}
+	if err := a.SetOpenSessionBudget("one", 0, "hard", false); err != nil {
+		t.Fatal(err)
+	}
+	addOpenSpend(a, "unlimited", "chat-one", .4)
+	if err := a.SetOpenSessionBudget("one", .2, "hard", true); err != nil {
+		t.Fatal(err)
+	}
+	a.SaveState()
+	restarted, err := New(a.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := restarted.OpenSessions()[0]; r.Cost != 0 || r.Spent != .76 || !r.Enabled {
+		t.Fatalf("fresh allowance/history lost on restart: %+v", r)
+	}
+}
+
+func TestOpenBudgetSurvivesTemporaryRouteAndRootResolution(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	reportTUI(t, a, "one", "child", false)
+	if err := a.SetOpenSessionBudget("one", .2, "hard", true); err != nil {
+		t.Fatal(err)
+	}
+	addOpenSpend(a, "first", "child", .08)
+	a.SetSessionParent("child", "parent")
+	reportTUI(t, a, "one", "parent", false)
+	if r := a.OpenSessions()[0]; !r.Enabled || r.Cost != .08 || r.SessionID != "parent" {
+		t.Fatalf("root resolution removed cap: %+v", r)
+	}
+	reportTUI(t, a, "one", "", false)
+	a.SetCompact(true)
+	if r := a.OpenSessions()[0]; !r.Enabled || r.Limit != .2 || r.SessionID != "parent" {
+		t.Fatalf("temporary route removed cap: %+v", r)
+	}
+	a.SaveState()
+	restarted, err := New(a.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportTUI(t, restarted, "one", "parent", false)
+	addOpenSpend(restarted, "next", "parent", .13)
+	restarted.ProcessBudgetRules()
+	if v := openVerdicts(t, restarted).Sessions["parent"]; v.Limit != .2 || v.Cost != .21 || v.State != "over" {
+		t.Fatalf("follow-up escaped retained cap: %+v", v)
+	}
+	reportTUI(t, restarted, "one", "different-chat", false)
+	if r := restarted.OpenSessions()[0]; r.Enabled {
+		t.Fatal("genuinely different conversation inherited the cap")
 	}
 }
 

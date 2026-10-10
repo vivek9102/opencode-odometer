@@ -33,6 +33,10 @@ export function Docks():Promise<Array<string>>;
 
 export function ExportCsv():Promise<string>;
 
+export function FallbackModels(arg1:string):Promise<Array<app.FallbackChoice>>;
+
+export function HasMetadataKey():Promise<boolean>;
+
 export function HideToTray():Promise<void>;
 
 export function IncreaseOpenSessionBudget(arg1:string,arg2:number):Promise<void>;
@@ -57,11 +61,17 @@ export function RaiseLimit():Promise<void>;
 
 export function Ready():Promise<void>;
 
+export function ReconcileWindowLayout():Promise<void>;
+
+export function RefreshMetadata():Promise<string>;
+
 export function RefreshPrices():Promise<string>;
 
 export function ReloadPrices():Promise<void>;
 
 export function ResetTrip():Promise<void>;
+
+export function ResumeOpenSession(arg1:string):Promise<void>;
 
 export function SavePosition(arg1:number,arg2:number):Promise<void>;
 
@@ -71,19 +81,29 @@ export function SetCompact(arg1:boolean):Promise<void>;
 
 export function SetContext(arg1:context.Context):Promise<void>;
 
+export function SetCounter(arg1:string):Promise<void>;
+
 export function SetDock(arg1:string):Promise<string>;
 
 export function SetEnabled(arg1:boolean):Promise<void>;
 
 export function SetLimit(arg1:number):Promise<void>;
 
+export function SetMetadataKey(arg1:string):Promise<void>;
+
 export function SetMode(arg1:string):Promise<void>;
 
 export function SetOpenSessionBudget(arg1:string,arg2:number,arg3:string,arg4:boolean):Promise<void>;
 
+export function SetOpenSessionRule(arg1:string,arg2:app.BudgetRule):Promise<void>;
+
 export function SetPeek(arg1:boolean):Promise<void>;
 
 export function SetPreferences(arg1:app.Preferences):Promise<void>;
+
+export function SetRuleToast(arg1:boolean):Promise<void>;
+
+export function SetRuleToastSize(arg1:number):Promise<void>;
 
 export function SetScreenSize(arg1:number,arg2:number):Promise<void>;
 

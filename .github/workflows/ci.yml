@@ -47,6 +47,8 @@ jobs:
         run: |
           node --check frontend/dist/main.js
           node --check frontend/dist/experience.js
+          node --check frontend/dist/sessions.js
+          node --check frontend/dist/budget-rules.js
           node --check plugin/event-diagnostics.js
       - name: Plugin regression tests
         run: node --test plugin/*.test.mjs
@@ -59,7 +61,7 @@ jobs:
         run: |
           set -e
           fail=0
-          for f in odometer_state.json budget.json grace_claims.json prices.local.json; do
+          for f in odometer_state.json budget.json grace_claims.json prices.local.json metadata_settings.json model_metadata.json; do
             if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
               echo "::error::$f must never be committed"
               fail=1

@@ -66,6 +66,7 @@ func (s *Service) ShowFromTray() {
 	runtime.WindowUnminimise(s.Ctx)
 	runtime.WindowSetAlwaysOnTop(s.Ctx, true)
 	runtime.WindowShow(s.Ctx)
+	s.ReconcileWindowLayout()
 	s.applyPosition()
 }
 func (s *Service) TogglePause() {
@@ -78,25 +79,40 @@ func (s *Service) TogglePause() {
 // use the same work-area positioning as the bar; floating previews restore
 // their exact original coordinates instead of persisting a temporary move.
 func (s *Service) SetPeek(on bool) {
-	if s.Ctx == nil || s.peek == on || (!s.appCompact && on) {
+	s.setPeekSize(on, peekHeight)
+}
+
+func (s *Service) peekWindowHeight() int {
+	if s.peek && s.peekSize >= 46 {
+		return s.peekSize
+	}
+	if s.peek {
+		return peekHeight
+	}
+	return 46
+}
+
+func (s *Service) setPeekSize(on bool, height int) {
+	if s.Ctx == nil || (!s.appCompact && on) || (s.peek == on && (!on || s.peekWindowHeight() == height)) {
 		return
 	}
-	if on {
+	if on && !s.peek {
 		x, y := runtime.WindowGetPosition(s.Ctx)
 		s.peekPosition = [2]int{x, y}
 	}
 	s.peek = on
 	h := 46
 	if on {
-		h = peekHeight
+		h = height
 	}
-	runtime.WindowSetSize(s.Ctx, 360, h)
+	s.peekSize = h
+	runtime.WindowSetSize(s.Ctx, windowWidth(true), h)
 	if s.App.DockMode() {
 		s.applyDock()
 	} else {
 		x, y := s.peekPosition[0], s.peekPosition[1]
 		if on {
-			y -= peekHeight - 46
+			y -= h - 46
 		}
 		if wa, ok := primaryWorkArea(); ok {
 			x -= wa.Left

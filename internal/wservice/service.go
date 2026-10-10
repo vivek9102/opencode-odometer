@@ -137,6 +137,7 @@ type Snapshot struct {
 	Charges     []app.Charge    `json:"charges"`
 	Sparkline   []float64       `json:"sparkline"`
 	Peek        bool            `json:"peek"`
+	PeekHeight  int             `json:"peek_height"`
 }
 
 // Service is the object bound into the JS frontend.
@@ -153,6 +154,7 @@ type Service struct {
 	backoffCur time.Duration
 
 	peek             bool
+	peekSize         int
 	peekPosition     [2]int
 	trayStop         func()
 	trayReady        bool
@@ -331,7 +333,7 @@ func (s *Service) snapshot() *Snapshot {
 		Link: link, IdleFor: idleFor,
 		EstimatedModels: estimated,
 		Dock:            a.Dock(), Docked: a.DockMode(), Compact: s.appCompact, Rows: rows,
-		Preferences: a.Preferences(), Charge: a.LastCharge(), Charges: a.RecentCharges(), Sparkline: a.RecentSpend(), Peek: s.peek,
+		Preferences: a.Preferences(), Charge: a.LastCharge(), Charges: a.RecentCharges(), Sparkline: a.RecentSpend(), Peek: s.peek, PeekHeight: s.peekWindowHeight(),
 	}
 	openRows := a.OpenSessions()
 	s.selectionMu.Lock()
@@ -353,6 +355,9 @@ func (s *Service) snapshot() *Snapshot {
 	snap.OpenSessions, snap.SelectedSession = openRows, selected
 	snap.SessionCount = len(openRows)
 	snap.OpenCost, snap.OpenRate = a.OpenSessionTotals(openRows)
+	if view == "RUN" {
+		snap.Cost = snap.OpenCost
+	}
 	for _, row := range openRows {
 		if row.ID == selected {
 			snap.SessionID, snap.SessionCost, snap.Limit, snap.Mode = row.SessionID, row.Cost, row.Limit, row.Mode
@@ -940,9 +945,7 @@ func (s *Service) SetCompact(on bool) {
 		runtime.WindowSetAlwaysOnTop(s.Ctx, true)
 	}
 	if s.appCompact == on {
-		// Nothing to do. The frontend re-asserts the current layout on every
-		// init, and repeating the resize/reposition work makes the window
-		// visibly jump.
+		s.ReconcileWindowLayout()
 		return
 	}
 	s.SetPeek(false)
@@ -960,6 +963,24 @@ func (s *Service) SetCompact(on bool) {
 		}
 	}
 	s.refresh()
+}
+
+// ReconcileWindowLayout repairs the rectangle using the backend's current
+// layout, without changing layout state or saving a stale frontend snapshot.
+func (s *Service) ReconcileWindowLayout() {
+	if s.Ctx == nil || runtime.WindowIsMinimised(s.Ctx) {
+		return
+	}
+	compact := s.appCompact
+	wantW, wantH := windowWidth(compact), windowHeight(compact)
+	if compact && s.peek {
+		wantH = s.peekWindowHeight()
+	}
+	w, h := runtime.WindowGetSize(s.Ctx)
+	if w != wantW || h != wantH {
+		runtime.WindowSetSize(s.Ctx, wantW, wantH)
+		s.applyPosition()
+	}
 }
 
 // UnlockSession is retained for older callers that grant extra headroom.
@@ -1031,7 +1052,7 @@ func (s *Service) applyDock() {
 	}
 	w, h := windowWidth(s.appCompact), windowHeight(s.appCompact)
 	if s.peek && s.appCompact {
-		h = peekHeight
+		h = s.peekWindowHeight()
 	}
 
 	// Prefer the OS work area: it already excludes the taskbar, whatever its
@@ -1237,6 +1258,7 @@ func (s *Service) Start() {
 		case <-time.After(20 * time.Second):
 		}
 		a.MaybeRefreshPrices(24 * time.Hour)
+		a.MaybeRefreshMetadata()
 
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
@@ -1248,6 +1270,7 @@ func (s *Service) Start() {
 				return
 			case <-ticker.C:
 				a.MaybeRefreshPrices(24 * time.Hour)
+				a.MaybeRefreshMetadata()
 			}
 		}
 	}()
@@ -1327,7 +1350,11 @@ func windowHeight(compact bool) int {
 	if compact {
 		return 46
 	}
-	return 780
+	height := 780
+	if wa, ok := primaryWorkArea(); ok && wa.Bottom-wa.Top-24 < height {
+		height = wa.Bottom - wa.Top - 24
+	}
+	return height
 }
 
 // dataDir mirrors the main package's data location so exports land beside the

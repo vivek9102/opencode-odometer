@@ -22,6 +22,13 @@ import (
 
 // Session is one session's published verdict.
 type Session struct {
+	Strict          bool    `json:"strict,omitempty"`
+	ManualStop      bool    `json:"manual_stop,omitempty"`
+	CancellationID  string  `json:"cancellation_id,omitempty"`
+	Stage           string  `json:"stage,omitempty"`
+	Generation      string  `json:"generation,omitempty"`
+	OriginalModel   string  `json:"original_model,omitempty"`
+	FallbackModel   string  `json:"fallback_model,omitempty"`
 	BudgetSessionID string  `json:"budget_session_id,omitempty"`
 	Cost            float64 `json:"cost"`
 	State           string  `json:"state"`
@@ -36,6 +43,7 @@ type Session struct {
 
 // BudgetFile is the full document written to budget.json.
 type BudgetFile struct {
+	Accounted map[string]string `json:"accounted,omitempty"`
 	// FreeModels comes from the same price book as accounting and the picker.
 	// Missing/unknown prices are never permission to bypass a spending cap.
 	FreeModels        []string           `json:"free_models,omitempty"`

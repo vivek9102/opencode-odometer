@@ -35,6 +35,9 @@ func (a *App) requestChatAbort(sid string, timeout time.Duration) error {
 }
 
 func (a *App) RequestOpenSessionAbort(id string) error {
+	if err := a.CancelOpenSessionContinuation(id); err != nil {
+		return err
+	}
 	for _, row := range a.OpenSessions() {
 		if row.ID == id {
 			if row.SessionID == "" {

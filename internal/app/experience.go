@@ -70,19 +70,25 @@ type ModelPrice struct {
 	CacheWrite float64 `json:"cache_write"`
 }
 type ConfiguredModel struct {
-	Key      string      `json:"key"`
-	Name     string      `json:"name"`
-	Category string      `json:"category"`
-	Rate     *ModelPrice `json:"rate,omitempty"`
+	CanonicalModelID string      `json:"canonical_model_id,omitempty"`
+	ToolCall         *bool       `json:"tool_call,omitempty"`
+	Reasoning        *bool       `json:"reasoning,omitempty"`
+	Context          int64       `json:"context,omitempty"`
+	InputModalities  []string    `json:"input_modalities,omitempty"`
+	Key              string      `json:"key"`
+	Name             string      `json:"name"`
+	Category         string      `json:"category"`
+	Rate             *ModelPrice `json:"rate,omitempty"`
 }
 type ModelInventory struct {
-	AbortProtocol  int               `json:"abort_protocol"`
-	SwitchProtocol int               `json:"switch_protocol"`
-	PID            int               `json:"pid"`
-	Instance       string            `json:"instance"`
-	Sessions       []string          `json:"sessions"`
-	Updated        int64             `json:"updated"`
-	Models         []ConfiguredModel `json:"models"`
+	ContinueProtocol int               `json:"continue_protocol"`
+	AbortProtocol    int               `json:"abort_protocol"`
+	SwitchProtocol   int               `json:"switch_protocol"`
+	PID              int               `json:"pid"`
+	Instance         string            `json:"instance"`
+	Sessions         []string          `json:"sessions"`
+	Updated          int64             `json:"updated"`
+	Models           []ConfiguredModel `json:"models"`
 }
 
 // Prefer live plugin inventories (one per OpenCode process). A global config

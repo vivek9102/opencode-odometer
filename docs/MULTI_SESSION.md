@@ -1,10 +1,10 @@
 # Open TUI budgets: implementation and review
 
-Open TUI budgets and the compact aggregate dock have been reviewed. The local review build is `build/bin/OpenCode_Odometer-preview-flows.exe`.
+The compact budget UI is ready for local review in `build/bin/OpenCode_Odometer-budget-ui-preview.exe`. See [automatic budget rules](BUDGET_RULES.md) for the current flow, metadata setup, validation and file summary.
 
 ## Screenshots
 
-These screenshots show the current frontend with demo data. The full gallery, including all four dock states, is in the [README](../README.md#screenshots).
+These screenshots show the frontend with demo data. The gallery, including the five dock states and rule editor, is in the [README](../README.md#screenshots).
 
 ![Expanded panel with the global odometer, open sessions, model usage and selected-session controls](screenshots/expanded.png)
 
@@ -13,24 +13,24 @@ These screenshots show the current frontend with demo data. The full gallery, in
 ## Behaviour
 
 - Each newly opened OpenCode TUI registers immediately, including the home screen before the first chat. It gets a stable name such as `keen-robin-c22b85c4`, shown on a separate row in the TUI, its terminal title and the Odometer list. The former folder prefix is unnecessary for uniqueness and is omitted from new names. Naming makes no model request.
-- The list comes from live TUI reports, not the saved conversation inventory. Idle TUIs stay listed. Normal exit reports closure; a killed process or a heartbeat older than ten seconds expires. Closure removes the entry, its cap and grace bookkeeping, while retaining accounting history.
+- The list comes from live TUI reports, not the saved conversation inventory. Idle TUIs stay listed. Normal exit reports closure; a killed process expires. A heartbeat delay while the process is alive does not remove its cap. Temporary blank routes and root ancestry resolution preserve the binding; a confirmed different conversation starts without a cap. Closure removes the entry and its cap, while retaining accounting history.
 - Each entry starts without a cap. An optional cap set on the home screen binds to the first chat. Changing to another conversation resets the cap; starting another TUI gets another name and an unarmed entry.
-- Enabling a cap counts subsequent spend. Editing an armed cap preserves the counted spend. Widget restart preserves caps for TUIs that remain open. TRIP reset does not reset those caps.
-- Hard mode blocks the next paid request at 100%. Soft mode permits one grace turn, with a hard stop at 150%. Free models remain available. Usage arrives as OpenCode reports it, so an already-running response can exceed the cap; this is not a provider-side dollar ceiling.
-- Delegated child conversations share the root cap and grace allowance. STOP asks the selected TUI to abort that root and its known children, and waits for an acknowledgement. It does not close the terminal.
-- The dock stays at 340 × 46, retaining its original height and digit sizes. Healthy states show `2 sessions · all within budget` or `2 sessions · no limits`. At 75%, it shows the worst capped entry's complete name and percentage, such as `⚠ clear-fox-930e1799 82%`. At 100%, it shows that name and spent/limit amounts with a red border. Names retain the identifier suffix and wrap inside the existing width. The tooltip holds the count, budget details and full names of all open entries. There is no dock STOP button or OVER label; STOP and limit editing live in the expanded panel.
+- Aggregate spending is counted from TUI startup. Enabling a cap starts its allowance at zero; editing an enabled cap re-evaluates it without resetting allowance spend. Disable/re-enable opens a fresh allowance. Widget restart preserves caps for TUIs that remain open. TRIP reset does not reset those caps.
+- All open-TUI limits are hard, without grace turns. At 100%, Stop blocks further paid steps; a configured Switch rule stops the original turn and automatically continues once on its fallback with a separate allowance. Usage arrives as OpenCode reports it, so an already-running response can exceed the cap; this is not a provider-side dollar ceiling.
+- Delegated child conversations share the root cap. STOP SESSION cancels current activity like Esc and waits for acknowledgement, without changing the allowance or model. It suppresses continuation of the cancelled task; a later user message follows the usual budget policy.
+- The dock stays at 340 × 46, retaining its height and digit sizes. It labels RUN, shows healthy/unlimited summaries, amber warnings at 75%, a blue fallback caption, or a red stopped caption and spent/limit. Names retain their identifier suffix; long fallback captions clamp within the width, with full details in the tooltip. There is no dock STOP button or OVER label. Temporary action toasts grow upward and return to the dock dimensions on dismissal.
 - The dock caption is independent of the panel's selected row. For example, when clear-fox does work while clear-owl is selected, an unlimited dock shows `2 sessions · no limits` instead of appearing to belong to clear-owl. Alerts identify the worst cap, and expanding an over-budget dock selects that entry. Panel selection continues to target only the footer.
 - The dock totals messages for currently displayed conversations since their TUI opened, counting a shared conversation only once. Its burn rate and activity also use only those open entries; closed conversations leave the total and rate. The global panel remains independent of the dock and its selected row. Enforcement pause remains visible even when a session is over budget.
 - The selected-session heading and ENABLE checkbox are separate. Checking ENABLE before entering an amount keeps the checkbox selected and asks for a positive amount. Backend refreshes preserve edited values and focus; queued saves and rapid row selection cannot apply stale checkbox states to another row.
-- The expanded panel keeps the global TRIP/TOTAL odometer, statistics and model usage table. Session selection changes only the footer target. The sessions list and the global model table scroll independently, vertically.
+- The expanded panel labels RUN/TRIP/TOTAL and keeps the statistics and global model usage table. Session selection changes only the footer target. The sessions list and model table scroll independently, vertically. The fallback picker opens separately. The window retains 800×780, bounded by the desktop work area.
 - Single-entry and empty-list states work without inherited defaults. With no open TUI, limit and STOP controls are disabled.
 
 ## Review steps
 
 1. Inspect the [screenshot gallery](../README.md#screenshots). The tracked images are in `docs/screenshots/`; running the browser smoke refreshes their originals in `build/multi-session-ui/`. These show the actual frontend with synthetic session data.
-2. Close the currently running Odometer, then launch `build/bin/OpenCode_Odometer-preview-flows.exe` from File Explorer. Codex's binary-file preview does not launch an executable. Alternatively, use PowerShell: `& '.\build\bin\OpenCode_Odometer-preview-flows.exe'`. This uses the normal single-instance lock. Its first launch installs the companion and registers it in OpenCode's TUI configuration.
+2. Close the currently running Odometer, then launch `build/bin/OpenCode_Odometer-budget-ui-preview.exe` from File Explorer. Codex's binary-file preview does not launch an executable. This uses the normal single-instance lock. Its first launch installs the companion and registers it in OpenCode's TUI configuration.
 3. Restart OpenCode, opening two or more TUIs. Each should appear before a prompt is sent, with its name on both sides. A terminal host that ignores application titles may keep its own tab label; the name is still visible inside OpenCode.
-4. Set a cap on one row, select another and confirm it has no cap. Try checking ENABLE with an empty amount, entering a cap, hard/soft modes, STOP, independent scrolling and closing one TUI. Review the one-TUI layout as well.
+4. Set a cap on one row, select another and confirm it has no cap. Check ENABLE with an empty amount, configure Stop/Switch and paid/free fallbacks, try manual STOP/resume, independent scrolling and closing one TUI. Review the one-TUI layout as well. The [rule guide](BUDGET_RULES.md) lists the tested automatic continuation flow.
 5. Validate the appearance and behaviour before shipping a new build.
 
 Live OpenCode configuration and the currently running Odometer were not replaced during automated testing. The real TUI test used isolated configuration, session storage and a local fake provider; it made no paid provider calls.
@@ -51,7 +51,7 @@ Before a TUI has used a model, OpenCode's current TUI API does not expose the se
 
 ## Files changed
 
-The latest dock refinement changes `frontend/dist/sessions.js` (four-state captions and selection independence), `frontend/dist/style.css` (wrapping and spacing within the same dimensions), `tools/multi-session-ui-smoke.cjs` (flow, identity, reproduction and geometry checks), and this document plus `README.md`. It makes no changes to budget enforcement or the OpenCode companion. The browser suites and preview build were rerun for this refinement; the Go and real TUI results below cover the earlier backend/companion changes.
+The table below documents the original open-TUI integration. The current rule-engine, metadata and automatic continuation changes have their own [file summary and validation](BUDGET_RULES.md#change-map).
 
 | File | Purpose |
 |---|---|

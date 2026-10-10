@@ -49,6 +49,16 @@ func TestOpenSessionSelectionAndClosedFallback(t *testing.T) {
 	if snap.OpenCost < 1.299999 || snap.OpenCost > 1.300001 {
 		t.Fatalf("dock included closed history: %v", snap.OpenCost)
 	}
+	svc.SetCounter("RUN")
+	run := svc.Snapshot()
+	if run.View != "RUN" || run.Cost != run.OpenCost || run.Limit != 1 || run.SessionCost != 1.1 {
+		t.Fatalf("RUN differs from dock or changed the selected policy: %+v", run)
+	}
+	svc.SetCounter("TOTAL")
+	total := svc.Snapshot()
+	if total.Cost < 10.299999 || total.SessionCost != run.SessionCost || total.Limit != run.Limit {
+		t.Fatal("counter changed policy or lost closed history")
+	}
 	report("two", true)
 	snap = svc.Snapshot()
 	if snap.SelectedSession != "one" || snap.BudgetEnabled || snap.SessionID != "chat-one" || snap.SessionCount != 1 {

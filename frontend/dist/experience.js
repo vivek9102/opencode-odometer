@@ -55,6 +55,7 @@ function openSettings() {
   $("pref-dim").checked=p.idle_dim!==false;
   $("pref-pause").checked=!!p.paused;
   $("settings-result").textContent="";settingsModal.classList.remove("hidden");
+  if(Svc().HasMetadataKey)Svc().HasMetadataKey().then(saved=>{$("metadata-result").textContent=saved?"Benchmark key configured; refresh to load scores.":"Optional key needed for Artificial Analysis scores.";}).catch(()=>{});
 }
 function closeSettings(){settingsModal.classList.add("hidden");}
 $("bd-settings").addEventListener("click",openSettings);
@@ -68,7 +69,21 @@ for(const id of ["pref-start","pref-collapse","pref-dim","pref-pause"])$(id).add
 let collapseTimer=null;
 function cancelCollapse(){clearTimeout(collapseTimer);collapseTimer=null;}
 function canAutoCollapse(){return snapshot?.preferences?.auto_collapse && !snapshot.compact && !adviceOpen && !document.activeElement?.matches("input,select,textarea") && !document.querySelector(".modal:not(.hidden)");}
-window.addEventListener("focus",cancelCollapse);
+let layoutFrame=null;
+function reconcileWindowLayout(){
+  if(layoutFrame!==null)return;
+  // Windows restores the old native rectangle after a resize made while
+  // minimised. Coalesce focus/resize events without changing the saved layout.
+  // Do not submit a layout from an old snapshot: a native resize can arrive
+  // before the snapshot acknowledging the user's Expand/DOCK click.
+  layoutFrame=requestAnimationFrame(()=>{layoutFrame=null;if(snapshot)Svc().ReconcileWindowLayout();});
+}
+window.addEventListener("focus",()=>{
+  cancelCollapse();reconcileWindowLayout();
+});
+window.addEventListener("resize",()=>{
+  if(snapshot?.compact&&innerWidth>0&&innerHeight>0&&(innerWidth!==340||innerHeight!==(snapshot.peek?snapshot.peek_height||178:46)))reconcileWindowLayout();
+});
 window.addEventListener("blur",()=>{
   cancelPeek();
   cancelCollapse();

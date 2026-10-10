@@ -33,7 +33,16 @@ The compact dock stays at 340 × 46 and totals spending across open sessions:
 | Limits set, all within budget | ![Green dock with the open session count and all within budget summary](docs/screenshots/docked-ok.png) |
 | No limits set | ![Dock showing the open session count and no limits summary](docs/screenshots/docked-no-limit.png) |
 | A session reaches 75% | ![Amber dock showing the full session name, 82 percent usage and the budget edge](docs/screenshots/docked-warning.png) |
-| A session exceeds its budget | ![Red dock showing the full session name and spending against its limit](docs/screenshots/docked-over.png) |
+| A session is on fallback | ![Blue dock showing the session and fallback model](docs/screenshots/docked-fallback.png) |
+| A session stops | ![Red dock showing the session and stopped indication](docs/screenshots/docked-over.png) |
+
+The compact limit section configures a separate fallback allowance:
+
+![Expanded panel with compact per-session budget controls](docs/screenshots/expanded-rules.png)
+
+![Cheaper-model popup with measured score and extra budget](docs/screenshots/fallback-picker.png)
+
+See [automatic budget rules, metadata and validation](docs/BUDGET_RULES.md).
 
 See [session behaviour and review steps](docs/MULTI_SESSION.md) for details.
 
@@ -96,15 +105,19 @@ they return token usage. Odometer can price that usage locally. See
 - Open the rebuilt executable once, then restart OpenCode to activate the updated
   bundled plugin. Model routing requires a chat observed by that plugin.
 
-- **Live odometer** — mechanical-style counter, TRIP (resettable) and TOTAL.
+- **Live odometer** — mechanical-style counter, labelled RUN, TRIP (resettable) and TOTAL. The compact dock always shows RUN across open TUIs.
 - **Cache-aware pricing** — `input`, `output`, `cache_read` and `cache_write`
   priced separately, so cached tokens use the appropriate rate.
-- **Per-open-session budget** — `soft` / `hard`, with an amber warning at 75%. Counts only spend
-  *from the moment you enable it*, so switching it on never retroactively locks
-  a session in progress.
-- **Blocks before the provider is called** — the plugin refuses the turn in
-  `chat.message` and `tool.execute.before`, so a runaway agent loop is stopped
-  rather than merely reported.
+- **Per-open-session budget** — hard limits without grace, with an amber warning at 75%.
+  Counts spending from TUI startup; setting or editing the limit re-evaluates immediately.
+- **Blocks before the next provider call** — the plugin rechecks every model/tool
+  step, waiting for the preceding usage to be accounted. A request already
+  dispatched can still overshoot its allowance.
+- **Automatic cheaper-model fallback** — a configured per-session rule stops the
+  original turn at exhaustion, activates a separate fallback allowance and submits
+  one continuation in the same conversation. Manual STOP suppresses continuation.
+- **Measured model facts** — models.dev capabilities plus optional Artificial
+  Analysis scores/speed; exact matches only, with unmatched models labelled Not rated.
 - **Auto-updating prices** — ~1,090 models from [models.dev](https://models.dev),
   refreshed in the background. A snapshot is compiled into the binary as an
   offline floor.
@@ -243,39 +256,31 @@ truth.
 
 ## Budget enforcement
 
-**The limit applies per session, not globally.** Three chats with a $5 limit
-means $15 of total headroom — it is a per-chat cap, not a shared pot. The bar
-tracks the active chat, including its delegated child sessions. Those children
-share the parent cap and grace allowance.
+Each open TUI starts without a limit. Setting one controls that conversation and
+its delegated children. Limits are hard: warning at 75%, then blocking further
+paid requests at 100%, without a grace turn. An in-flight request can overshoot.
+The dock aggregates open-session RUN spending, while the footer edits only the
+selected session. TRIP/TOTAL and the model usage table remain global.
 
-| Mode | Behaviour |
-|---|---|
-| `warn` | Never blocks. Toast only. |
-| `soft` *(default)* | Blocks paid turns at 100%, grants **one grace turn**, hard stop at 1.5×. |
-| `hard` | Blocks paid turns at 100% immediately, no grace. |
+Open-session spending is counted from TUI startup, including before a limit is
+enabled. Editing a cap, resetting TRIP or restarting Odometer preserves it. Closing a TUI removes
+its rule/cap but preserves history. Two TUIs sharing one conversation cannot have
+independent execution; automatic fallback is refused for that shared conversation.
 
-Colours: green → amber (80%) → **orange** (over, still recoverable) → red (past
-hard stop). Orange versus red is the useful distinction — whether raising the
-limit can still rescue the session.
+Choose **Stop at limit** or configure **Switch to a cheaper model…** with an eligible fallback.
+Switching happens at exhaustion, through stop → prepare → activate fallback → one
+automatic continuation. A paid fallback has its own allowance and **Stop / Keep
+going** choice; a confirmed free route has no paid cap. Raising or clearing the
+original limit restores its model when counted spending is below the new cap.
+STOP SESSION cancels current activity like Esc, suppresses automatic continuation
+of that task, and leaves the allowance unchanged. A later user message follows
+the normal budget policy.
 
-> A limit set while mode is `warn` blocks nothing. The budget label says
-> "(warn only)" so this is visible rather than assumed.
-
----
-
-Enabling a limit starts a new spending period. Changing an enabled limit,
-resetting TRIP, pausing enforcement, or restarting Odometer preserves that
-period's spend and grace usage. Pause keeps recording costs; resume enforces
-the existing cap.
-
-At the limit, choose a model labelled **FREE** to continue without disabling
-the cap. Free turns and their tools use no grace; the existing spend stays
-visible. Switching back to a paid model respects the exhausted limit, including
-paid delegated work. Unknown prices do not qualify as free. The plugin uses
-Odometer's pricing classification rather than treating zero SDK rates as free.
-Returning to a paid model while the limit is exhausted shows the limit
-notification again and cancels that request before provider dispatch. Choose
-a free model or raise the limit to resume in the same chat.
+Known free models remain available after automatic paid-budget exhaustion.
+Unknown prices are never classified as
+free. Keep Odometer running: the existing bridge stops enforcing after its verdict
+heartbeat expires. Details, metadata setup, limits and review steps are in
+[Automatic session budget rules](docs/BUDGET_RULES.md).
 
 ## Switching models
 

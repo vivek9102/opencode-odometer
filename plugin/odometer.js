@@ -528,6 +528,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
   const confirmedFree = (doc,key) => !!key && Array.isArray(doc?.free_models) && doc.free_models.includes(key)
   let inventory = []
   const observedSessions = new Set()
+  let openTUISessions = new Set()
   const sessionParents = new Map()
   function sessionBudget(doc, sid) {
     const seen = new Set()
@@ -560,8 +561,23 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       return
     }
     observedSessions.add(sid)
-    if (observedSessions.size > 100) {const oldest=observedSessions.values().next().value;observedSessions.delete(oldest);turnModels.delete(oldest)}
+    if (observedSessions.size > 100) {
+      const oldest=[...observedSessions].find(id=>!openTUISessions.has(id))
+      if(oldest){observedSessions.delete(oldest);turnModels.delete(oldest)}
+    }
     heartbeat(force)
+  }
+  function refreshTUIOwnership() {
+    let names=[];try{names=readdirSync(bridgeDir())}catch{return}
+    const current=new Set()
+    for(const name of names){
+      if(!name.startsWith('tui-')||!name.endsWith('.json'))continue
+      let tui;try{tui=JSON.parse(readFileSync(join(bridgeDir(),name),'utf8'))}catch{continue}
+      if(tui.pid!==process.pid||tui.closed||name!==`tui-${tui.id}.json`||!/^ses_[a-zA-Z0-9]+$/.test(tui.session_id||''))continue
+      current.add(tui.session_id)
+    }
+    openTUISessions=current
+    for(const sid of current)observeID(sid)
   }
   function atomicBridge(name, doc) {
     const dir = bridgeDir()
@@ -585,7 +601,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     const now = Date.now()
     if (!force && now-lastHeartbeat < 10_000) return
     lastHeartbeat = now
-    try { atomicBridge(`models-${process.pid}.json`, { switch_protocol:3, abort_protocol:1, pid: process.pid, instance:PLUGIN_INSTANCE, updated: Math.floor(Date.now()/1000), sessions: [...observedSessions], models: inventory }) } catch { /* bridge is optional */ }
+    try { atomicBridge(`models-${process.pid}.json`, { switch_protocol:3, continue_protocol:2, abort_protocol:1, pid: process.pid, instance:PLUGIN_INSTANCE, updated: Math.floor(Date.now()/1000), sessions: [...observedSessions], models: inventory }) } catch { /* bridge is optional */ }
   }
   function chatRoot(sid) {
     const seen=new Set();
@@ -636,6 +652,9 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       inventory = doc.all.filter(p => doc.connected.includes(p.id)).flatMap(p =>
         Object.entries(p.models || {}).map(([id, m]) => ({
           key: p.id + "/" + id, name: m.name || id, category: category(id),
+          canonical_model_id:m.canonical_model_id || "", tool_call:m.tool_call ?? m.capabilities?.toolcall,
+          reasoning:m.reasoning ?? m.capabilities?.reasoning, context:m.limit?.context || 0, input_modalities:m.modalities?.input || Object.entries(m.capabilities?.input || {}).filter(([,enabled])=>enabled).map(([type])=>type),
+          modalities:m.modalities || {},
           // SDK-normalised zero rates can mean unknown for private providers.
           // Do not turn them into claims that an unpriced model is free.
           ...(m.cost && (m.cost.input > 0 || m.cost.output > 0) ? {rate: {input:m.cost.input,output:m.cost.output,cache_read:m.cost.cache_read || 0,cache_write:m.cost.cache_write || 0}} : {}),
@@ -648,6 +667,207 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
     if (bridgeWork) return bridgeWork
     bridgeWork = consumeSwitch().finally(() => { bridgeWork = null })
     return bridgeWork
+  }
+
+  const continuations=new Map(), completedUsage=new Map(),blockedTools=new Set()
+  const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms))
+  function continuationVerdict(req) {
+    const doc=readBudget(),s=doc&&sessionBudget(doc,req.session_id)
+    if(!doc?.enabled || !s?.enforced || s.manual_stop || s.generation!==req.id)throw Error("Continuation cancelled: the budget or selected conversation changed.")
+    if(s.stage==="fallback"&&s.state==="over")throw Error("Fallback allowance exhausted; the session remains paused.")
+    return s
+  }
+  async function continuationBridge(name,doc) {
+    // Windows readers can briefly deny replacement of a bridge file. Retry
+    // only this atomic publication, never a model submission or tool action.
+    for(let attempt=0;;attempt++){
+      try{atomicBridge(name,doc);return}catch(error){
+        if(attempt>=5||!['EPERM','EACCES','EBUSY'].includes(error.code))throw error
+        await delay(10*2**attempt)
+      }
+    }
+  }
+  function continuationStatus(req,status,detail,ids=[]) {
+    return continuationBridge(`continue-status-${req.id}.json`,{id:req.id,status,detail,original_ids:ids})
+  }
+  async function conversationMessages(sid) {
+    const result=await sdkCall(signal=>client.session.messages({path:{id:sid},signal}))
+    if(result?.error)throw Error("Could not inspect the interrupted conversation.")
+    const messages=result?.data || result
+    if(!Array.isArray(messages))throw Error("OpenCode did not return conversation messages.")
+    return messages
+  }
+  async function nativeContinuationCall(req,action,body) {
+    // The plugin's in-process HTTP client can have a different live event
+    // scope from the owning TUI. Use that TUI's client for cancellation and
+    // submission so its running turn and synced messages change together.
+    let owner;
+    for(const name of readdirSync(bridgeDir())){
+      if(!name.startsWith("tui-")||!name.endsWith(".json"))continue;
+      try{const row=JSON.parse(readFileSync(join(bridgeDir(),name),"utf8"));if(row.started&&row.pid===process.pid&&row.session_id===req.session_id&&!row.closed){owner=row;break}}catch{}
+    }
+    if(!owner)return null; // Headless OpenCode has no terminal client.
+    if(owner.continue_protocol!==1)throw Error("Restart OpenCode to load automatic continuation in its owning TUI.");
+    const id=`${req.id}-${action}-${Date.now()}`,responseFile=join(bridgeDir(),`continue-tui-status-${id}.json`);
+    await continuationBridge(`continue-tui-${owner.id}.json`,{id,instance:owner.id,session_id:req.session_id,generation:req.id,action,body,children:req.children||[],issued:Date.now()/1000});
+    const end=Date.now()+15000;
+    while(Date.now()<end){
+      try{const response=JSON.parse(readFileSync(responseFile,"utf8"));if(response.id===id){try{rmSync(responseFile,{force:true})}catch{};if(response.error)throw Error(response.error);return response.result||{data:true}}}catch(e){if(e.message&&!['ENOENT'].includes(e.code)&&!(e instanceof SyntaxError))throw e}
+      await delay(50);
+    }
+    throw Error("Owning TUI did not acknowledge automatic continuation. No retry was sent.");
+  }
+  async function continueAutomatically(req) {
+    let originalIDs=[]
+    try {
+      continuationVerdict(req)
+      const selected=inventory.find(m=>m.key===req.key&&m.category==="chat")
+      if(!selected)throw Error("Configured fallback is unavailable in this OpenCode instance.")
+      // Do not abort a running tool and blindly replay its side effects.
+      // The exhausted verdict blocks new tool/model work; let active tools settle.
+      const end=Date.now()+30_000
+      let rootMessages=[]
+      while(true){
+        continuationVerdict(req)
+        let busy=false
+        for(const sid of [req.session_id,...(req.children||[])]){
+          const messages=await conversationMessages(sid)
+          if(sid===req.session_id)rootMessages=messages
+          busy ||= messages.some(m=>(m.parts||[]).some(p=>p.type==="tool"&&["pending","running"].includes(p.state?.status)))
+        }
+        if(!busy)break
+        if(Date.now()>end)throw Error("A tool is still running. Automatic continuation was paused to avoid repeating actions.")
+        await delay(100)
+      }
+      const nativeAbort=await nativeContinuationCall(req,"abort");
+      if(!nativeAbort)for(const sid of [req.session_id,...(req.children||[])]){
+        const result=await sdkCall(signal=>client.session.abort({path:{id:sid},signal}))
+        if(result?.error)throw Error("OpenCode did not acknowledge cancellation.")
+      }
+      // Abort acknowledgement plus idle status prevents submitting into an
+      // old running turn. This also works when OpenCode has no TCP listener.
+      while(true){
+        continuationVerdict(req)
+        const result=await nativeContinuationCall(req,"status")||await sdkCall(signal=>client.session.status({signal}))
+        if(result?.error)throw Error("Could not confirm that OpenCode stopped.")
+        const states=result?.data || result
+        if(!states || typeof states!=="object")throw Error("Could not confirm idle session state.")
+        if([req.session_id,...(req.children||[])].every(sid=>!states[sid]||states[sid].type==="idle"))break
+        if(Date.now()>end)throw Error("OpenCode did not become idle; automatic continuation was paused.")
+        await delay(100)
+      }
+      for(const sid of [req.session_id,...(req.children||[])]){
+        const messages=await conversationMessages(sid)
+        if(sid===req.session_id)rootMessages=messages
+        originalIDs.push(...messages.filter(m=>m.info?.role==="assistant").map(m=>m.info.id))
+        if(messages.some(m=>(m.parts||[]).some(p=>p.type==="tool"&&["pending","running"].includes(p.state?.status))))throw Error("An interrupted tool has an uncertain result. The session remains paused.")
+        if(messages.some(m=>(m.parts||[]).some(p=>p.type==="tool"&&p.state?.status==="error"&&/abort|interrupt|cancel/i.test(p.state.error||"")&&!blockedTools.has(`${sid}:${m.info?.parentID}:${p.callID}`))))throw Error("An interrupted tool has an uncertain result. Verify it before resuming.")
+      }
+      await continuationStatus(req,"prepared","Original turn stopped; preparing fallback allowance.",originalIDs)
+      while(continuationVerdict(req).stage!=="fallback"){
+        if(Date.now()>end)throw Error("Fallback allowance was not activated; the session remains paused.")
+        await delay(50)
+      }
+      const choice={id:req.id,session_id:req.session_id,key:req.key,persistent:true,issued:req.issued}
+      await continuationBridge(`switch-session-${req.session_id}.json`,choice)
+      const last=rootMessages.findLast(m=>m.info?.role==="assistant")?.info
+      const lastUser=rootMessages.findLast(m=>m.info?.role==="user")?.info
+      // A finished answer is not an outstanding task: select the fallback
+      // for future messages without buying an unnecessary extra response.
+      if(last?.finish==="stop"&&!last.error&&last.time?.completed && !rootMessages.findLast(m=>m.info?.id===last.id)?.parts?.some(p=>p.type==="tool")){
+        await continuationStatus(req,"completed","Task already completed; fallback selected for the next message.",originalIDs);return
+      }
+      const allowance=continuationVerdict(req)
+      // A conservative estimate includes the uncached conversation, completed
+      // tool output and space for tool schemas. It is not a provider quote.
+      const usage=last?.tokens||{},knownInput=(usage.input||0)+(usage.cache?.read||0)+(usage.cache?.write||0)+(usage.output||0)
+      const inputEstimate=Math.max(knownInput,Buffer.byteLength(JSON.stringify(rootMessages),"utf8"))+2048
+      // Private routes often omit context metadata. Unknown is not a zero
+      // capacity: attempt the user's configured model and let OpenCode/provider
+      // validate it. Do not invent a context limit or demand a confirmation.
+      const context=req.context||selected.context||0
+      if(context>0&&inputEstimate+32>context)throw Error("Conversation exceeds the configured fallback context capacity. The session remains paused.")
+      for(const m of rootMessages)for(const p of m.parts||[]){
+        if(p.type!=="file")continue
+        const modality=p.mime?.startsWith("image/")?"image":p.mime?.startsWith("audio/")?"audio":p.mime?.startsWith("video/")?"video":p.mime==="application/pdf"?"pdf":"text"
+        if(modality!=="text"&&!req.input_modalities?.includes(modality))throw Error("Fallback does not have confirmed support for a conversation attachment.")
+      }
+      if(!confirmedFree(readBudget(),req.key)&&!(allowance.limit-allowance.cost>(inputEstimate*req.input_price+32*req.output_price)/1_000_000))throw Error("Fallback allowance cannot cover the estimated next request. Increase it before resuming.")
+      await continuationStatus(req,"dispatching","Sending one automatic continuation on the fallback.",originalIDs)
+      continuationVerdict(req) // STOP may arrive while a bridge write is retried.
+      const [providerID,...modelParts]=req.key.split("/")
+      // Async submission avoids holding a synchronous HTTP request for the
+      // entire coding task. Correlate its first successful model step using
+      // a unique user-message ID, not another turn in the same conversation.
+      // Match OpenCode's ascending message-ID clock (low 48 bits of ms*4096).
+      // An arbitrary UUID/timestamp prefix would sort after later normal turns
+      // and could make the continuation appear to be the last user forever.
+      const clock=((BigInt(Date.now())*4096n+1n)&((1n<<48n)-1n)).toString(16).padStart(12,"0")
+      const messageID=`msg_${clock}${req.id.replaceAll("-","").slice(0,14).padEnd(14,"0")}`
+      if(!client.session.promptAsync)throw Error("This OpenCode version does not support asynchronous continuation.")
+      const promptBody={messageID,agent:lastUser?.agent||"build",model:{providerID,modelID:modelParts.join("/")},parts:[{type:"text",text:"[Odometer automatic budget continuation] The original model allowance was exhausted and the configured fallback allowance is active. Continue the outstanding user task using this conversation. Review completed and interrupted tool actions first. Preserve completed work and verify uncertain results before repeating actions. Respect existing permissions. Do not restart the task from scratch."}]}
+      const response=await nativeContinuationCall(req,"prompt",promptBody)||await sdkCall(signal=>client.session.promptAsync({path:{id:req.session_id},body:promptBody,signal}),10_000)
+      if(response?.error)throw Error("Fallback submission failed. The session remains paused; no automatic retry was sent.")
+      const confirmEnd=Date.now()+300_000
+      while(true){
+        continuationVerdict(req)
+        const answer=(await conversationMessages(req.session_id)).find(m=>m.info?.role==="assistant"&&m.info?.parentID===messageID)
+        if(answer?.info?.error)throw Error(fallbackFailure(answer.info.error,req.key))
+        if(answer?.info?.finish){
+          const actual=answer.info.providerID+"/"+answer.info.modelID
+          if(actual!==req.key)throw Error("OpenCode did not confirm the configured fallback model.")
+          await continuationStatus(req,"confirmed",`Switched to ${selected.name} · continuing.`,originalIDs);break
+        }
+        if(Date.now()>confirmEnd)throw Error("Fallback response was not confirmed; the session remains paused. No automatic retry was sent.")
+        await delay(250)
+      }
+    }catch(e){await continuationStatus(req,"failed",String(e.message||e),originalIDs)}
+  }
+  function fallbackFailure(error,key){
+    const status=error?.data?.statusCode||error?.statusCode;
+    const message=String(error?.data?.message||error?.message||"");
+    const reason=status===429||/rate.?limit/i.test(message)?"rate limit":status===401||status===403||error?.name==="ProviderAuthError"||/expired.?key|invalid.?api.?key|api.?key.*not valid|API_KEY_INVALID/i.test(message)?"authentication failed":"request failed";
+    return `Fallback ${key} stopped: ${reason}. No other provider was tried.`;
+  }
+  function reportFallbackFailure(sid,error,actual){
+    if(!sid||!error||error.name==="MessageAbortedError"||error.name==="AbortError")return;
+    const s=sessionBudget(readBudget()||{},sid);
+    if(s?.stage!=="fallback"||s.manual_stop||!s.fallback_model||actual&&actual!==s.fallback_model)return;
+    if(!s.budget_session_id||!/^[a-zA-Z0-9-]+$/.test(s.budget_session_id))return;
+    // Subsequent user turns also need failure reporting after STOP invalidates
+    // the original continuation generation. Never select an alternate route.
+    atomicBridge(`fallback-error-${s.budget_session_id}.json`,{id:s.budget_session_id,session_id:chatRoot(sid),generation:s.generation||"",key:s.fallback_model,detail:fallbackFailure(error,s.fallback_model)});
+  }
+  function drainContinuations(){
+    let names=[];try{names=readdirSync(bridgeDir())}catch{return}
+    for(const name of names){
+      if(!name.startsWith(`continue-${process.pid}-`)||!name.endsWith(".json"))continue
+      const file=join(bridgeDir(),name);let req
+      try{req=JSON.parse(readFileSync(file,"utf8"))}catch{continue}
+      if(!req?.id||!/^[a-zA-Z0-9-]+$/.test(req.id)||req.instance!==PLUGIN_INSTANCE||!req.session_id||!observedSessions.has(req.session_id))continue
+      const claim=file+".claim"
+      try{renameSync(file,claim)}catch{continue}
+      const existing=join(bridgeDir(),`continue-status-${req.id}.json`)
+      if(continuations.has(req.id)||existsSync(existing)){rmSync(claim,{force:true});continue}
+      const task=(async()=>{
+        if(Date.now()/1000-req.issued>60){await continuationStatus(req,"failed","Automatic continuation expired; the session remains paused.");return}
+        await continuationStatus(req,"claimed","Waiting for original work to stop.")
+        await continueAutomatically(req)
+      })().catch(()=>{/* Persistent bridge errors are reported by the widget's timeout. */}).finally(()=>{continuations.delete(req.id);try{rmSync(claim,{force:true})}catch{}})
+      continuations.set(req.id,task)
+    }
+  }
+  async function syncStrictUsage(input) {
+    let doc=readBudget(),s=doc&&sessionBudget(doc,input.sessionID)
+    if(!s?.strict || !doc?.enabled)return
+    let root=input.sessionID;const visited=new Set();while(sessionParents.has(root)&&!visited.has(root)){visited.add(root);root=sessionParents.get(root)}
+    const observation=completedUsage.get(input.sessionID)||completedUsage.get(root)
+    if(!observation)return
+    const end=Date.now()+4000
+    while(doc?.accounted?.[observation.id]!==observation.signature){
+      if(Date.now()>end||!doc?.enabled||!s)throw new DOMException("Budget accounting unavailable; request paused before provider dispatch.","AbortError")
+      await delay(50);doc=readBudget();s=doc&&sessionBudget(doc,input.sessionID)
+    }
   }
   function pendingSelection(sid) {
     const req=pending.get(sid)
@@ -733,10 +953,12 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
   }, 0)
   startupTimer.unref?.()
   const bridgeTimer=setInterval(() => {
+    refreshTUIOwnership()
     heartbeat()
     drainSwitch()
     drainCommands(client)
     drainAborts()
+    drainContinuations()
     const now=Date.now()/1000
     if(!inventory.length && !inventoryBusy && now-lastInventoryAttempt>=5) void refreshInventory()
     for (const [sid,req] of pending) if(now-req.issued>600) {pending.delete(sid);writeSwitchStatus(req,"expired","No request was submitted within ten minutes.")}
@@ -763,10 +985,13 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       if (!doc || !doc.enabled) return
       // Historical spend stays over the limit. Only this confirmed free
       // request is allowed; paid requests still use the existing verdict.
-      if (confirmedFree(doc,key)) return
-
       const s = sessionBudget(doc, input.sessionID)
       if (!s) return
+      if(s.strict && s.enforced!==false){
+        const denied=s.stage==="switching" || s.stage==="fallback" && key!==s.fallback_model && !confirmedFree(doc,key)
+        if(denied){if(deferBlock)return true;throw new DOMException("Session paused by its budget rule; no request dispatched.","AbortError")}
+      }
+      if (confirmedFree(doc,key)) return
 
       const sid = input.sessionID
       const pct = Math.round(s.fraction * 100)
@@ -855,6 +1080,8 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       if (event.type === "session.created" || event.type === "session.updated") observeSession(info)
       if (sid) observeID(sid)
       if (info?.role === "assistant") {
+        reportFallbackFailure(sid,info.error,modelKey(info))
+        if(info.finish&&info.tokens){const t=info.tokens;completedUsage.set(info.sessionID,{id:info.id,signature:`${t.input||0}/${t.output||0}/${t.reasoning||0}/${t.cache?.read||0}/${t.cache?.write||0}/${info.finish}`})}
         const turn=turnModels.get(info.sessionID)
         if(!turn || info.parentID===turn.userID)turnModels.set(info.sessionID,{...turn,key:modelKey(info),userID:info.parentID})
         const req=awaiting.get(info.sessionID)
@@ -865,6 +1092,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
         }
       }
       if (event.type === "session.error") {
+        reportFallbackFailure(sid,event.properties?.error)
         const req=awaiting.get(sid);if(req){awaiting.delete(sid);writeSwitchStatus(req,"failed","OpenCode reported a request error.")}
       }
       // Feed the odometer. This is the ingest path that works when OpenCode
@@ -908,9 +1136,21 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       if (!doc || !doc.enabled) return
 
       const sid = input.sessionID
-      if(confirmedFree(doc,turnModels.get(sid)?.key))return
       const s = sessionBudget(doc, sid)
       if (!s) return
+      if(s.strict){
+        try{await syncStrictUsage(input);await enforceChat(input,turnModels.get(sid)?.key||"")}
+        catch(e){
+          // A rejection from this before-hook proves the tool body was not
+          // entered. It is safe to retry on the fallback, unlike an aborted
+          // running tool with an uncertain side effect.
+          const userID=turnModels.get(sid)?.userID
+          if(e.name==="AbortError"&&input.callID&&userID){blockedTools.add(`${sid}:${userID}:${input.callID}`);if(blockedTools.size>5000)blockedTools.delete(blockedTools.values().next().value)}
+          throw e
+        }
+        return
+      }
+      if(confirmedFree(doc,turnModels.get(sid)?.key))return
 
       if (s.state === "over" && s.enforced !== false) {
         const mode = s.mode || doc.mode || "soft"
@@ -932,6 +1172,11 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
 
     "chat.message": async (input, output) => {
       observeID(input.sessionID)
+      const cancelled=sessionBudget(readBudget()||{},input.sessionID)
+      const automatic=output?.parts?.some(p=>p.type==="text"&&p.text?.startsWith("[Odometer automatic budget continuation]"))
+      if(cancelled?.manual_stop&&cancelled.cancellation_id&&!automatic&&output?.message){
+        try{atomicBridge(`continue-reset-${cancelled.budget_session_id}.json`,{id:cancelled.budget_session_id,session_id:chatRoot(input.sessionID),token:cancelled.cancellation_id})}catch{}
+      }
       void drainCommands(client)
       await drainSwitch()
       if (existsSync(join(bridgeDir(),`switch-session-${input.sessionID}.json`)) && !inventory.length) await refreshInventory()
@@ -966,12 +1211,14 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       writeSwitchStatus(req, "applied", req.persistent ? "Applied to this message. This model stays active for the chat." : "Applied to the next request; awaiting OpenCode's response.")
     },
     "chat.params": async (input) => {
+      await syncStrictUsage(input)
       const key = modelKey({providerID:input.model?.providerID,modelID:input.model?.id})
       const turn = turnModels.get(input.sessionID)
       // An allowed turn has already claimed its grace in chat.message. Do
       // not charge grace again on each model step. Deferred blocks and an
       // actual model differing from that choice still need enforcement.
-      if (!turn || turn.blocked || turn.userID !== input.message?.id || turn.approvedKey !== key) {
+      const strict=sessionBudget(readBudget()||{},input.sessionID)?.strict
+      if (strict || !turn || turn.blocked || turn.userID !== input.message?.id || turn.approvedKey !== key) {
         await enforceChat(input,key)
       }
     },

@@ -12,6 +12,11 @@ models-*.json
 tui-*.json
 switch-*.json
 abort-*.json
+continue-*.json
+continue-*.claim
+fallback-error-*.json
+metadata_settings.json
+model_metadata.json
 stop-tui-*.json
 preferences.json
 launch-suppressed.json

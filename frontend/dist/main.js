@@ -77,7 +77,7 @@ function accentFor(snap) {
   // usual confident green would claim "you spent nothing" when the truth is
   // "this could not be priced".
   if (allSpendUnpriced(snap)) return "#a1a1aa";
-  return snap.view === "TRIP" ? "#22c55e" : "#ef4444";
+  return snap.view === "TOTAL" ? "#ef4444" : "#22c55e";
 }
 
 // allSpendUnpriced reports that tokens were used but nothing could be priced,
@@ -207,7 +207,9 @@ function render(snap) {
 
   // board
   $("bd-mode").textContent = snap.view;
-  $("bd-mode").style.color = snap.view === "TRIP" ? "var(--green)" : "var(--red)";
+  $("bd-mode").style.color = snap.view !== "TOTAL" ? "var(--green)" : "var(--red)";
+  $("bd-reset").classList.toggle("hidden",snap.view!=="TRIP");
+  document.querySelectorAll("[data-counter]").forEach(e=>e.classList.toggle("on",e.dataset.counter===snap.view));
   // State the gap rather than reporting a total that omits it.
   $("bd-status").textContent = allSpendUnpriced(snap)
     ? "no prices - spend not counted"
@@ -322,6 +324,7 @@ function render(snap) {
 
   checkAdvice(snap);
   checkToast(snap);
+  if(typeof renderBudgetRules==="function")renderBudgetRules(snap);
 }
 
 // ---- view switching ----
@@ -375,7 +378,12 @@ $("bd-collapse").addEventListener("click", () => setView(false));
 $("bd-enabled").addEventListener("change", (e) => Array.isArray(snapshot?.open_sessions)?saveOpenBudget(e.target.checked):Svc().SetEnabled(e.target.checked));
 $("bd-limit").addEventListener("change", (e) => {
   const v = parseFloat(e.target.value);
-  if(Array.isArray(snapshot?.open_sessions)){saveOpenBudget(true);return;}
+  if(Array.isArray(snapshot?.open_sessions)){
+    // An amount typed before ENABLE is a draft. Auto-enabling on blur would
+    // tick the checkbox before its click toggles it, immediately clearing it.
+    if($("bd-enabled").checked)saveOpenBudget(true);
+    return;
+  }
   if (!isNaN(v) && v >= 0) Svc().SetLimit(v);
   else if (snapshot) e.target.value = String(snapshot.limit);
 });
@@ -969,8 +977,8 @@ function openMenu(x, y) {
     menu.appendChild(menuItem("Reset position (bottom centre)",
       () => Svc().SetDock("bottom-center").then(() => toast("Docked bottom-centre", "ok"))));
     menu.appendChild(menuSep());
-    menu.appendChild(menuItem("Toggle TRIP / TOTAL", () => Svc().ToggleViewMode()));
-    menu.appendChild(menuItem("Reset trip", () => {
+    for(const view of ["RUN","TRIP","TOTAL"])menu.appendChild(menuItem("Show "+view, () => Svc().SetCounter(view)));
+    if(snapshot?.view==="TRIP")menu.appendChild(menuItem("Reset trip", () => {
       if (confirm("Reset the trip counter?")) Svc().ResetTrip();
     }));
     menu.appendChild(menuItem("Switch model", openModelModal));
@@ -1008,6 +1016,7 @@ window.addEventListener("blur", closeMenu);
 // ---- budget warning toast (fires once per threshold) ----
 let toastWarned = false, toastOvered = false;
 function checkToast(snap) {
+  if(Array.isArray(snap.open_sessions))return;
   if (snap.preferences?.paused) return;
   if (!snap.budget_enabled || snap.limit <= 0) { toastWarned = toastOvered = false; return; }
   if (snap.budget_state === "over") {
@@ -1060,7 +1069,7 @@ $("bar-odometer").addEventListener("click", () => {
   if (clickTimer) return;
   clickTimer = setTimeout(() => {
     clickTimer = null;
-    if (!$("bar").classList.contains("hidden")) Svc().ToggleViewMode();
+    if (!$("bar").classList.contains("hidden")) expandSessions();
   }, 220);
 });
 $("bar-odometer").addEventListener("dblclick", () => {

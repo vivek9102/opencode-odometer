@@ -7,7 +7,7 @@ import (
 	"github.com/vivek9102/opencode-odometer/internal/prices"
 )
 
-// ViewMode reports whether the board shows TRIP or TOTAL spend.
+// ViewMode reports whether the board shows RUN, TRIP or TOTAL spend.
 func (a *App) ViewMode() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -17,8 +17,11 @@ func (a *App) ViewMode() string {
 	return a.state.View
 }
 
-// SetViewMode flips the board between TRIP and TOTAL.
+// SetViewMode changes the display without changing any session allowance.
 func (a *App) SetViewMode(v string) {
+	if v != "RUN" && v != "TRIP" && v != "TOTAL" {
+		return
+	}
 	a.mu.Lock()
 	a.state.View = v
 	a.mu.Unlock()

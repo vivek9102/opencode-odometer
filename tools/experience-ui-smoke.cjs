@@ -18,7 +18,7 @@ const {join}=require('node:path');
   window.runtime={EventsOn:(name,cb)=>window.refreshHandler=cb};
   window.testModels=Array.from({length:54},(_,i)=>({key:'custom/model-'+i+(i<12?'-free':''),name:'Model '+i,provider:'custom',free:i<12,cheaper:i<40,category:i===53?'embedding':'chat',unknown:i===52,input_cost:1,output_cost:2}));
   window.go={wservice:{Service:{
-   Snapshot:async()=>({...testSnap}),SetScreenSize:async()=>{},SetCompact:async v=>{testSnap.compact=v;testSnap.peek=false;emit()},SetPeek:async v=>{testSnap.peek=v;emit()},
+   Snapshot:async()=>({...testSnap}),SetScreenSize:async()=>{},SetCompact:async v=>{testSnap.compact=v;testSnap.peek=false;emit()},SetPeek:async v=>{testSnap.peek=v;emit()},ReconcileWindowLayout:async()=>{},
    SetPreferences:async p=>{testSnap.preferences=p;emit()},UnpricedModels:async()=>[],PendingPrices:async()=>[],PendingPriceSuggestions:async()=>Array.from({length:7},(_,i)=>({key:'custom/price-'+i,needs_confirmation:true,source:'estimate from acme/model',suggested_rate:{input:1,output:2}})),PricesAgeHours:async()=>0,
    AvailableModels:async()=>testModels,PendingModelSwitch:async sid=>window.testSwitch?.session_id===sid ? testSwitch : {},ClearModelSwitch:async()=>{window.testSwitch=null},SwitchModel:async(key,sid)=>{window.testSwitch={id:'req1',key,session_id:sid,persistent:true,issued:Date.now()/1000,status:'queued',detail:'Ready for next request'};return testSwitch},ModelSwitchStatus:async()=>testSwitch,
    Advice:async()=>({session_id:testSnap.session_id,limit:1,cost:1.1,rate:.2,tokens:1000,msgs:2,drivers:[{key:'custom/default',output:1.1}],cheaper:testModels.slice(0,2)}),ShowAlert:async()=>{},

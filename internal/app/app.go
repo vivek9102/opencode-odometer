@@ -17,6 +17,7 @@ import (
 
 	"github.com/vivek9102/opencode-odometer/internal/budget"
 	"github.com/vivek9102/opencode-odometer/internal/ledger"
+	"github.com/vivek9102/opencode-odometer/internal/modelmeta"
 	"github.com/vivek9102/opencode-odometer/internal/opencode"
 	"github.com/vivek9102/opencode-odometer/internal/plugin"
 	"github.com/vivek9102/opencode-odometer/internal/prices"
@@ -80,11 +81,13 @@ type Client interface {
 
 // App ties together pricing, the ledger, the budget and the plugin contract.
 type App struct {
-	Prices   *prices.Book
-	Budget   *budget.Budget
-	Ledger   *ledger.Store
-	Contract *plugin.Contract
-	Client   Client
+	metadataMu sync.Mutex
+	metadata   *modelmeta.Catalog
+	Prices     *prices.Book
+	Budget     *budget.Budget
+	Ledger     *ledger.Store
+	Contract   *plugin.Contract
+	Client     Client
 	// Spool reads events the plugin appends from inside OpenCode. It is the
 	// ingest path that works when OpenCode serves its API in-process and
 	// binds no TCP port, which is the default.
@@ -421,6 +424,13 @@ func (a *App) SaveState() {
 	stCopy := a.state
 	stCopy.OpenPolicies = make(map[string]OpenPolicy, len(a.state.OpenPolicies))
 	for id, p := range a.state.OpenPolicies {
+		if p.OriginalIDs != nil {
+			assignments := make(map[string]bool, len(p.OriginalIDs))
+			for mid, original := range p.OriginalIDs {
+				assignments[mid] = original
+			}
+			p.OriginalIDs = assignments
+		}
 		stCopy.OpenPolicies[id] = p
 	}
 	stCopy.SessionParents = make(map[string]string, len(a.state.SessionParents))

@@ -9,7 +9,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/vivek9102/opencode-odometer/internal/budget"
 	"github.com/vivek9102/opencode-odometer/internal/ledger"
 	"github.com/vivek9102/opencode-odometer/internal/opencode"
 	"github.com/vivek9102/opencode-odometer/internal/plugin"
@@ -29,11 +28,26 @@ type OpenTUI struct {
 }
 
 type OpenPolicy struct {
-	SessionID string  `json:"session_id"`
-	Enabled   bool    `json:"enabled"`
-	Limit     float64 `json:"limit"`
-	Mode      string  `json:"mode"`
-	Baseline  float64 `json:"baseline"`
+	SessionID        string          `json:"session_id"`
+	Enabled          bool            `json:"enabled"`
+	Limit            float64         `json:"limit"`
+	Mode             string          `json:"mode"`
+	Baseline         float64         `json:"baseline"`
+	Rule             string          `json:"rule,omitempty"`
+	OriginalModel    string          `json:"original_model,omitempty"`
+	FallbackModel    string          `json:"fallback_model,omitempty"`
+	FallbackLimit    float64         `json:"fallback_limit,omitempty"`
+	Then             string          `json:"then,omitempty"`
+	Stage            string          `json:"stage,omitempty"`
+	Stopped          bool            `json:"stopped,omitempty"`
+	ManualStop       bool            `json:"manual_stop,omitempty"`
+	CancellationID   string          `json:"cancellation_id,omitempty"`
+	OriginalIDs      map[string]bool `json:"original_ids,omitempty"`
+	FallbackBaseline float64         `json:"fallback_baseline,omitempty"`
+	TransitionID     string          `json:"transition_id,omitempty"`
+	TransitionAt     int64           `json:"transition_at,omitempty"`
+	Detail           string          `json:"detail,omitempty"`
+	Event            string          `json:"event,omitempty"`
 }
 
 type OpenSessionRow struct {
@@ -48,10 +62,23 @@ type OpenSessionRow struct {
 	GraceRemaining int     `json:"grace_remaining"`
 	PastHardStop   bool    `json:"past_hard_stop"`
 	Enforced       bool    `json:"enforced"`
+	Rule           string  `json:"rule"`
+	OriginalModel  string  `json:"original_model"`
+	FallbackModel  string  `json:"fallback_model"`
+	FallbackLimit  float64 `json:"fallback_limit"`
+	FallbackSpent  float64 `json:"fallback_spent"`
+	FallbackFree   bool    `json:"fallback_free"`
+	Then           string  `json:"then"`
+	Stage          string  `json:"stage"`
+	OnFallback     bool    `json:"on_fallback"`
+	Stopped        bool    `json:"stopped"`
+	ManualStop     bool    `json:"manual_stop"`
+	Detail         string  `json:"detail"`
+	RuleEvent      string  `json:"rule_event"`
 }
 
-// RefreshOpenSessions expires dead/crashed TUIs but retains healthy idle ones.
-// A tombstone handles normal exit; PID plus a lease handles forced exit.
+// RefreshOpenSessions removes closed/dead TUIs. A delayed heartbeat from a
+// still-running process must not delete its allowance during a model/tool call.
 func (a *App) RefreshOpenSessions() {
 	files, _ := filepath.Glob(filepath.Join(a.experienceDir(), "tui-*.json"))
 	now := time.Now().Unix()
@@ -73,16 +100,27 @@ func (a *App) RefreshOpenSessions() {
 			a.state.OpenSessionsMode = true
 			changed = true
 		}
-		if entry.Closed || now-entry.Updated > 10 || !opencode.ProcessAlive(entry.PID) {
+		if entry.Closed || !opencode.ProcessAlive(entry.PID) {
 			delete(a.openTUIs, entry.ID)
 			continue
 		}
 		entry.SessionID = budgetRoot(entry.SessionID, a.state.SessionParents)
+		// Home/route refreshes can temporarily report no conversation. Keep the
+		// last binding until a different non-empty conversation is confirmed.
+		if entry.SessionID == "" {
+			entry.SessionID = budgetRoot(a.openTUIs[entry.ID].SessionID, a.state.SessionParents)
+			if entry.SessionID == "" {
+				entry.SessionID = budgetRoot(a.state.OpenPolicies[entry.ID].SessionID, a.state.SessionParents)
+			}
+		}
+		if now-entry.Updated > 10 {
+			entry.Active = false
+		}
 		a.openTUIs[entry.ID] = entry
 		// Moving to a different conversation starts an unarmed budget. Going
 		// from the startup home screen to its first chat preserves a set cap.
 		if p, ok := a.state.OpenPolicies[entry.ID]; ok && p.SessionID != entry.SessionID {
-			if p.SessionID != "" {
+			if p.SessionID != "" && budgetRoot(p.SessionID, a.state.SessionParents) != entry.SessionID {
 				delete(a.state.OpenPolicies, entry.ID)
 				delete(a.graceUsed, entry.ID)
 			} else {
@@ -93,7 +131,7 @@ func (a *App) RefreshOpenSessions() {
 		}
 	}
 	for id, entry := range a.openTUIs {
-		if now-entry.Updated > 10 || !opencode.ProcessAlive(entry.PID) {
+		if !opencode.ProcessAlive(entry.PID) {
 			delete(a.openTUIs, id)
 		}
 	}
@@ -150,31 +188,66 @@ func (a *App) openRowsLocked() []OpenSessionRow {
 			p.Mode = "hard"
 		}
 		spent := a.openSpendLocked(entry, records)
-		b := budget.New()
-		b.Cfg = budget.Config{Enabled: p.Enabled, SessionLimitUSD: p.Limit, Mode: budget.Mode(p.Mode), WarnAtPercent: 75, BlockWhenExceeded: true, HardStopAt: 1.5, GraceTurns: 1}
-		s := budget.Session{Budget: b, Baseline: p.Baseline, GraceUsed: a.graceUsed[id]}
-		cost := s.EffCost(spent)
-		state, fraction := s.State(cost)
+		cost, fbSpent := a.policySpendLocked(entry, p, records)
+		fraction := 0.0
+		state := "ok"
+		if p.Limit > 0 {
+			fraction = cost / p.Limit
+		}
+		if fraction >= .75 {
+			state = "warn"
+		}
+		if fraction >= 1 {
+			state = "over"
+		}
 		if !p.Enabled || p.Limit <= 0 {
 			state = "ok"
 			fraction = 0
 		}
-		rows = append(rows, OpenSessionRow{OpenTUI: entry, Cost: cost, Spent: spent, Enabled: p.Enabled && p.Limit > 0, Limit: p.Limit, Mode: p.Mode, State: string(state), Fraction: fraction, GraceRemaining: s.RemainingGrace(cost), PastHardStop: s.PastHardStop(cost), Enforced: p.Enabled && p.Limit > 0 && !paused})
+		stage := p.Stage
+		if stage == "" {
+			stage = "original"
+		}
+		fb := stage == "fallback"
+		free := a.Prices.Entry(p.FallbackModel).Free && !a.Prices.Entry(p.FallbackModel).Unknown
+		stopped := p.Stopped || (!fb && state == "over" && p.Rule != "switch") || (fb && !free && p.Then != "go" && p.FallbackLimit > 0 && fbSpent >= p.FallbackLimit)
+		if stopped {
+			state = "over"
+		}
+		if fb && !stopped {
+			state = "fallback"
+		}
+		if stage == "switching" && !stopped {
+			state = "switching"
+		}
+		rule := p.Rule
+		if rule == "" {
+			rule = "stop"
+		}
+		then := p.Then
+		if then == "" {
+			then = "stop"
+		}
+		rows = append(rows, OpenSessionRow{OpenTUI: entry, Cost: cost, Spent: spent, Enabled: p.Enabled && p.Limit > 0, Limit: p.Limit, Mode: "hard", State: state, Fraction: fraction, PastHardStop: stopped, Enforced: p.Enabled && p.Limit > 0 && !paused,
+			Rule: rule, OriginalModel: p.OriginalModel, FallbackModel: p.FallbackModel, FallbackLimit: p.FallbackLimit, FallbackSpent: fbSpent, FallbackFree: free, Then: then, Stage: stage, OnFallback: fb, Stopped: stopped, ManualStop: p.ManualStop, Detail: p.Detail, RuleEvent: p.Event})
 	}
 	rank := func(r OpenSessionRow) int {
-		if r.State == "over" {
+		if r.Stopped || r.State == "over" {
 			return 0
 		}
-		if r.State == "warn" {
+		if r.OnFallback || r.Stage == "switching" {
 			return 1
 		}
-		if r.Enabled {
+		if r.State == "warn" {
 			return 2
 		}
-		if r.SessionID != "" {
+		if r.Enabled {
 			return 3
 		}
-		return 4
+		if r.SessionID != "" {
+			return 4
+		}
+		return 5
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		x, y := rows[i], rows[j]
@@ -238,13 +311,35 @@ func (a *App) SetOpenSessionBudget(id string, limit float64, mode string, enable
 	if math.IsNaN(limit) || math.IsInf(limit, 0) || limit < 0 {
 		return fmt.Errorf("enter a finite, non-negative limit")
 	}
+	// Accept older clients' soft value, but all open-TUI limits are now hard.
 	if mode != "hard" && mode != "soft" {
-		return fmt.Errorf("choose hard or soft")
+		return fmt.Errorf("choose a valid limit mode")
 	}
+	mode = "hard"
 	if enabled && round4(limit) <= 0 {
 		return fmt.Errorf("enter a limit greater than zero")
 	}
 	a.RefreshOpenSessions()
+	// Invalidate an outstanding continuation before cancelling its stream. A
+	// return to the original model must not race a late fallback submission.
+	var before OpenSessionRow
+	for _, r := range a.OpenSessions() {
+		if r.ID == id {
+			before = r
+		}
+	}
+	returnOriginal := !enabled || before.Cost < round4(limit)
+	restore := returnOriginal && (before.OnFallback || before.Stage == "switching")
+	if restore {
+		if err := a.CancelOpenSessionContinuation(id); err != nil {
+			return err
+		}
+		if before.Active {
+			if err := a.stopOpenTUI(before); err != nil {
+				return err
+			}
+		}
+	}
 	a.mu.Lock()
 	entry, ok := a.openTUIs[id]
 	if !ok {
@@ -253,18 +348,46 @@ func (a *App) SetOpenSessionBudget(id string, limit float64, mode string, enable
 	}
 	p := a.state.OpenPolicies[id]
 	if enabled && !p.Enabled {
-		p.Baseline = a.openSpendLocked(entry, a.Ledger.GetMessagesSnapshot())
-		delete(a.graceUsed, id)
+		// Opening an allowance starts at zero. Editing an enabled allowance
+		// keeps its baseline; history and aggregate counters are unaffected.
+		original, fallback := a.policySpendLocked(entry, p, a.Ledger.GetMessagesSnapshot())
+		p.Baseline += original
+		p.FallbackBaseline += fallback
 	}
-	if !enabled {
-		p.Baseline = 0
-		delete(a.graceUsed, id)
+	if p.OriginalModel == "" {
+		p.OriginalModel = entry.Model
 	}
 	p.SessionID, p.Limit, p.Mode, p.Enabled = entry.SessionID, round4(limit), mode, enabled
+	if !enabled {
+		p.Limit = 0
+	}
+	cost, fb := a.policySpendLocked(entry, p, a.Ledger.GetMessagesSnapshot())
+	if !enabled || cost < p.Limit {
+		p.FallbackBaseline += fb
+		p.Stopped, p.ManualStop, p.TransitionID, p.CancellationID, p.Stage, p.Detail = false, false, "", "", "original", ""
+		p.TransitionAt = 0
+		if before.Stopped {
+			p.Detail = "Session resumed."
+			p.Event = newRuleEvent()
+		}
+	} else {
+		p.ManualStop, p.CancellationID = false, ""
+		if p.Stage == "" || p.Stage == "original" {
+			p.Stopped = false
+		}
+	}
 	a.state.OpenPolicies[id] = p
 	a.mu.Unlock()
 	a.PublishBudget()
 	a.SaveState()
+	if restore && p.OriginalModel != "" && entry.SessionID != "" {
+		if _, err := a.RequestModelSwitch(entry.SessionID, p.OriginalModel); err != nil {
+			a.setRuleFailure(id, "Could not restore the original model: "+err.Error())
+			return err
+		}
+	}
+	a.ProcessBudgetRules()
+	a.PublishBudget()
 	return nil
 }
 
@@ -274,7 +397,7 @@ func (a *App) IncreaseOpenSessionBudget(id string, amount float64) error {
 	}
 	for _, row := range a.OpenSessions() {
 		if row.ID == id {
-			return a.SetOpenSessionBudget(id, row.Limit+amount, row.Mode, true)
+			return a.ResumeOpenSession(id, amount)
 		}
 	}
 	return fmt.Errorf("this OpenCode TUI has closed")
@@ -283,14 +406,36 @@ func (a *App) IncreaseOpenSessionBudget(id string, amount float64) error {
 // Caller holds a.mu. Only displayed chats and their delegated children are
 // published. A shared chat open in two TUIs uses the stricter verdict.
 func (a *App) publishOpenBudgetsLocked() {
-	doc := plugin.BudgetFile{FreeModels: a.freeModelKeys(), Enabled: !a.Preferences().Paused, WarnAtPercent: 75, BlockWhenExceeded: true, Mode: "hard", HardStopAt: 1.5, GraceTurns: 1, Sessions: map[string]plugin.Session{}}
+	doc := plugin.BudgetFile{FreeModels: a.freeModelKeys(), Enabled: !a.Preferences().Paused, WarnAtPercent: 75, BlockWhenExceeded: true, Mode: "hard", HardStopAt: 1, GraceTurns: 0, Sessions: map[string]plugin.Session{}}
+	doc.Accounted = map[string]string{}
+	for _, rec := range a.Ledger.GetMessagesSnapshot() {
+		for _, entry := range a.openTUIs {
+			if budgetRoot(rec.SessionID, a.state.SessionParents) == entry.SessionID {
+				doc.Accounted[rec.MID] = fmt.Sprintf("%d/%d/%d/%d/%d/%s", rec.TokensIn, rec.TokensOut, rec.Reasoning, rec.CacheRead, rec.CacheWrite, rec.Finish)
+				break
+			}
+		}
+	}
 	for _, row := range a.openRowsLocked() {
 		if row.SessionID == "" || !row.Enabled {
 			continue
 		}
-		verdict := plugin.Session{BudgetSessionID: row.ID, Cost: row.Cost, State: row.State, Fraction: row.Fraction, Limit: row.Limit, Mode: row.Mode, GraceRemaining: row.GraceRemaining, HardStopAt: 1.5, PastHardStop: row.PastHardStop, Enforced: row.Enforced}
+		verdict := plugin.Session{BudgetSessionID: row.ID, Cost: row.Cost, State: row.State, Fraction: row.Fraction, Limit: row.Limit, Mode: "hard", HardStopAt: 1, PastHardStop: row.Stopped, Enforced: row.Enforced, Strict: true, ManualStop: row.ManualStop, CancellationID: a.state.OpenPolicies[row.ID].CancellationID, Stage: row.Stage, Generation: a.state.OpenPolicies[row.ID].TransitionID, OriginalModel: row.OriginalModel, FallbackModel: row.FallbackModel}
+		if row.Stage == "switching" || row.Stopped {
+			verdict.State = "over"
+		}
+		if row.OnFallback {
+			verdict.Cost, verdict.Limit = row.FallbackSpent, row.FallbackLimit
+			verdict.Fraction = 0
+			if row.FallbackLimit > 0 {
+				verdict.Fraction = row.FallbackSpent / row.FallbackLimit
+			}
+			if !row.Stopped {
+				verdict.State = "ok"
+			}
+		}
 		old, exists := doc.Sessions[row.SessionID]
-		if !exists || verdict.Fraction > old.Fraction || (verdict.Fraction == old.Fraction && verdict.Mode == "hard") {
+		if !exists || verdict.State == "over" && old.State != "over" || verdict.State == old.State && verdict.Fraction > old.Fraction {
 			doc.Sessions[row.SessionID] = verdict
 		}
 	}

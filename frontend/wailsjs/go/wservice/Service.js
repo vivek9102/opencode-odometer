@@ -58,6 +58,14 @@ export function ExportCsv() {
   return window['go']['wservice']['Service']['ExportCsv']();
 }
 
+export function FallbackModels(arg1) {
+  return window['go']['wservice']['Service']['FallbackModels'](arg1);
+}
+
+export function HasMetadataKey() {
+  return window['go']['wservice']['Service']['HasMetadataKey']();
+}
+
 export function HideToTray() {
   return window['go']['wservice']['Service']['HideToTray']();
 }
@@ -106,6 +114,14 @@ export function Ready() {
   return window['go']['wservice']['Service']['Ready']();
 }
 
+export function ReconcileWindowLayout() {
+  return window['go']['wservice']['Service']['ReconcileWindowLayout']();
+}
+
+export function RefreshMetadata() {
+  return window['go']['wservice']['Service']['RefreshMetadata']();
+}
+
 export function RefreshPrices() {
   return window['go']['wservice']['Service']['RefreshPrices']();
 }
@@ -116,6 +132,10 @@ export function ReloadPrices() {
 
 export function ResetTrip() {
   return window['go']['wservice']['Service']['ResetTrip']();
+}
+
+export function ResumeOpenSession(arg1) {
+  return window['go']['wservice']['Service']['ResumeOpenSession'](arg1);
 }
 
 export function SavePosition(arg1, arg2) {
@@ -134,6 +154,10 @@ export function SetContext(arg1) {
   return window['go']['wservice']['Service']['SetContext'](arg1);
 }
 
+export function SetCounter(arg1) {
+  return window['go']['wservice']['Service']['SetCounter'](arg1);
+}
+
 export function SetDock(arg1) {
   return window['go']['wservice']['Service']['SetDock'](arg1);
 }
@@ -146,6 +170,10 @@ export function SetLimit(arg1) {
   return window['go']['wservice']['Service']['SetLimit'](arg1);
 }
 
+export function SetMetadataKey(arg1) {
+  return window['go']['wservice']['Service']['SetMetadataKey'](arg1);
+}
+
 export function SetMode(arg1) {
   return window['go']['wservice']['Service']['SetMode'](arg1);
 }
@@ -154,12 +182,24 @@ export function SetOpenSessionBudget(arg1, arg2, arg3, arg4) {
   return window['go']['wservice']['Service']['SetOpenSessionBudget'](arg1, arg2, arg3, arg4);
 }
 
+export function SetOpenSessionRule(arg1, arg2) {
+  return window['go']['wservice']['Service']['SetOpenSessionRule'](arg1, arg2);
+}
+
 export function SetPeek(arg1) {
   return window['go']['wservice']['Service']['SetPeek'](arg1);
 }
 
 export function SetPreferences(arg1) {
   return window['go']['wservice']['Service']['SetPreferences'](arg1);
+}
+
+export function SetRuleToast(arg1) {
+  return window['go']['wservice']['Service']['SetRuleToast'](arg1);
+}
+
+export function SetRuleToastSize(arg1) {
+  return window['go']['wservice']['Service']['SetRuleToastSize'](arg1);
 }
 
 export function SetScreenSize(arg1, arg2) {

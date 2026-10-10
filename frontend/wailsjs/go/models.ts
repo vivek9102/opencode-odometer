@@ -38,6 +38,24 @@ export namespace app {
 	        this.comparable = source["comparable"];
 	    }
 	}
+	export class BudgetRule {
+	    rule: string;
+	    fallback_model: string;
+	    fallback_limit: number;
+	    then: string;
+
+	    static createFrom(source: any = {}) {
+	        return new BudgetRule(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rule = source["rule"];
+	        this.fallback_model = source["fallback_model"];
+	        this.fallback_limit = source["fallback_limit"];
+	        this.then = source["then"];
+	    }
+	}
 	export class Charge {
 	    sequence: number;
 	    id: string;
@@ -53,6 +71,70 @@ export namespace app {
 	        this.id = source["id"];
 	        this.cost = source["cost"];
 	    }
+	}
+	export class FallbackChoice {
+	    key: string;
+	    name: string;
+	    provider: string;
+	    input: number;
+	    output: number;
+	    free: boolean;
+	    ratio: number;
+	    unknown: boolean;
+	    estimated: boolean;
+	    source: string;
+	    category: string;
+	    current: boolean;
+	    cheaper: boolean;
+	    comparable: boolean;
+	    metadata: modelmeta.Metadata;
+	    tags: string[];
+	    eligible: boolean;
+	    reason?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FallbackChoice(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.name = source["name"];
+	        this.provider = source["provider"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.free = source["free"];
+	        this.ratio = source["ratio"];
+	        this.unknown = source["unknown"];
+	        this.estimated = source["estimated"];
+	        this.source = source["source"];
+	        this.category = source["category"];
+	        this.current = source["current"];
+	        this.cheaper = source["cheaper"];
+	        this.comparable = source["comparable"];
+	        this.metadata = this.convertValues(source["metadata"], modelmeta.Metadata);
+	        this.tags = source["tags"];
+	        this.eligible = source["eligible"];
+	        this.reason = source["reason"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ModelSwitch {
 	    id: string;
@@ -100,6 +182,19 @@ export namespace app {
 	    grace_remaining: number;
 	    past_hard_stop: boolean;
 	    enforced: boolean;
+	    rule: string;
+	    original_model: string;
+	    fallback_model: string;
+	    fallback_limit: number;
+	    fallback_spent: number;
+	    fallback_free: boolean;
+	    then: string;
+	    stage: string;
+	    on_fallback: boolean;
+	    stopped: boolean;
+	    manual_stop: boolean;
+	    detail: string;
+	    rule_event: string;
 
 	    static createFrom(source: any = {}) {
 	        return new OpenSessionRow(source);
@@ -126,6 +221,19 @@ export namespace app {
 	        this.grace_remaining = source["grace_remaining"];
 	        this.past_hard_stop = source["past_hard_stop"];
 	        this.enforced = source["enforced"];
+	        this.rule = source["rule"];
+	        this.original_model = source["original_model"];
+	        this.fallback_model = source["fallback_model"];
+	        this.fallback_limit = source["fallback_limit"];
+	        this.fallback_spent = source["fallback_spent"];
+	        this.fallback_free = source["fallback_free"];
+	        this.then = source["then"];
+	        this.stage = source["stage"];
+	        this.on_fallback = source["on_fallback"];
+	        this.stopped = source["stopped"];
+	        this.manual_stop = source["manual_stop"];
+	        this.detail = source["detail"];
+	        this.rule_event = source["rule_event"];
 	    }
 	}
 	export class Preferences {
@@ -178,6 +286,47 @@ export namespace app {
 	        this.output_rate = source["output_rate"];
 	        this.cache_read_rate = source["cache_read_rate"];
 	        this.cache_write_rate = source["cache_write_rate"];
+	    }
+	}
+
+}
+
+export namespace modelmeta {
+
+	export class Metadata {
+	    id: string;
+	    name: string;
+	    family?: string;
+	    tool_call?: boolean;
+	    reasoning?: boolean;
+	    context?: number;
+	    input_modalities?: string[];
+	    intelligence?: number;
+	    coding?: number;
+	    speed?: number;
+	    latency?: number;
+	    benchmark_id?: string;
+	    source?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Metadata(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.family = source["family"];
+	        this.tool_call = source["tool_call"];
+	        this.reasoning = source["reasoning"];
+	        this.context = source["context"];
+	        this.input_modalities = source["input_modalities"];
+	        this.intelligence = source["intelligence"];
+	        this.coding = source["coding"];
+	        this.speed = source["speed"];
+	        this.latency = source["latency"];
+	        this.benchmark_id = source["benchmark_id"];
+	        this.source = source["source"];
 	    }
 	}
 
@@ -442,6 +591,7 @@ export namespace wservice {
 	    charges: app.Charge[];
 	    sparkline: number[];
 	    peek: boolean;
+	    peek_height: number;
 
 	    static createFrom(source: any = {}) {
 	        return new Snapshot(source);
@@ -496,6 +646,7 @@ export namespace wservice {
 	        this.charges = this.convertValues(source["charges"], app.Charge);
 	        this.sparkline = source["sparkline"];
 	        this.peek = source["peek"];
+	        this.peek_height = source["peek_height"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

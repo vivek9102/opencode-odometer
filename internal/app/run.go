@@ -268,7 +268,7 @@ func (a *App) Poll() {
 	// The plugin ignores a budget older than two minutes. Keep its heartbeat
 	// fresh on every poll, including idle sessions and connected streams with
 	// no new messages, without moving any spending baselines.
-	defer a.PublishBudget()
+	defer func() { a.ProcessBudgetRules(); a.PublishBudget() }()
 	// Always drain the plugin spool first: it is the only ingest path that
 	// works when OpenCode serves its API in-process (no TCP port), which is
 	// the default for the TUI.
