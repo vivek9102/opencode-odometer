@@ -1,319 +1,171 @@
-# Pricing Guide
+# Pricing and accounting
 
-The Odometer uses a hybrid source hierarchy. Token counts always come from
-OpenCode. For money it uses, in order: an explicit free/local override, a
-non-zero cost reported by OpenCode, an exact `prices.json` entry, a
-deterministic cross-provider estimate, or unpriced `$0` with a prompt.
+Odometer receives token counts from OpenCode and records an accounting source
+for each message. Local pricing supports providers that do not report monetary
+costs, as well as gateways whose rates differ from public catalog rates.
 
-Each message stores the source used. Refreshing the catalog never rewrites
-completed history; only saving an explicit model override performs a visible,
-one-model correction.
+All token rates are **USD per one million tokens**. Displayed costs are accounting
+estimates unless they come from a provider-reported amount or a confirmed local
+rate. Use your provider's invoice to validate billing.
 
-All figures are **USD per 1,000,000 tokens**.
+## Cost-source precedence
 
----
+For each message, Odometer uses the first applicable source:
 
-## Contents
+1. An explicit free classification or saved local rate.
+2. A non-zero cost reported through OpenCode.
+3. An exact public catalog rate.
+4. A deterministic cross-provider price estimate.
+5. An unpriced zero amount, flagged for review.
 
-- [Why local pricing](#why-local-pricing)
-- [The price table](#the-price-table)
-- [Pulling prices from models.dev](#pulling-prices-from-modelsdev)
-- [Adding custom / private prices](#adding-custom--private-prices)
-- [Working out a reseller markup](#working-out-a-reseller-markup)
-- [Free and sovereign models](#free-and-sovereign-models)
-- [The reference model](#the-reference-model)
-- [Verifying against a real invoice](#verifying-against-a-real-invoice)
-- [Troubleshooting](#troubleshooting)
+A zero cost reported by OpenCode does not establish that the route is free.
+An unknown amount can understate spending and budget usage. Use **REVIEW PRICES**
+to confirm rates before relying on a spending cap.
 
----
+Ordinary public refreshes, saved rate changes and resets apply to future messages;
+they do not reprice completed message history. A provider/model switch does not
+erase accounting history.
 
-## Why local pricing
+## Price files and model keys
 
-Three reasons a local fallback remains necessary:
+| File | Purpose | Catalog refresh |
+|---|---|---|
+| `prices.json` | Cached public catalog | Replaced with refreshed public rates |
+| `prices.local.json` | Private or custom rates | Preserved |
 
-1. **Some providers report no cost at all.** Internal company gateways,
-   resellers and self-hosted proxies routinely return `cost: 0` on every
-   response. Anything that trusts the provider reports `$0.00` forever.
-2. **The same model costs different amounts at different providers.**
-   `qwen3-coder-480b` is $0.38/M at one gateway and $1.50/M at another — a 4x
-   spread. There is no single correct price for a model id.
-3. **Cache tokens dominate and are priced separately.** On real traffic,
-   cache reads were ~83% of all tokens. Pricing only input+output understates
-   true cost by roughly **8x**.
+Keys use `providerID/modelID`, matching the route recorded by OpenCode. The same
+model name can have different rates under different providers. An unmatched
+private route may receive a labelled cross-provider estimate. If no usable
+price or reported cost exists, it remains unpriced.
 
----
-
-## The price table
-
-`prices.json` looks like this:
+Example format, using illustrative rates:
 
 ```json
 {
-  "_comment": "USD per 1,000,000 tokens.",
-  "_source": "https://models.dev/api.json",
-  "reference_model": "anthropic/claude-sonnet-4-5",
+  "reference_model": "example/paid-model",
   "models": {
-    "anthropic/claude-sonnet-4-5": {
-      "name": "Claude Sonnet 4.5",
-      "input": 3.0,
-      "output": 15.0,
-      "cache_read": 0.3,
-      "cache_write": 3.75
+    "example/paid-model": {
+      "name": "Example paid model",
+      "input": 2.5,
+      "output": 10.0,
+      "cache_read": 0.25,
+      "cache_write": 3.125
     }
   }
 }
 ```
 
-### Model keys
-
-Always `providerID/modelID`, matching exactly what OpenCode records in its
-database. If a key does not match, the model shows as **unpriced** (amber, with
-a `?`) and contributes `$0.00`.
-
-To see what ids you are actually using:
-
-```powershell
-# unpriced models are listed by RELOAD PRICES in the app
-```
-
-### Fields
-
 | Field | Meaning |
 |---|---|
-| `input` | fresh prompt tokens |
-| `output` | generated tokens |
-| `cache_read` | tokens served from cache — usually ~10% of input |
-| `cache_write` | tokens written to cache — usually ~125% of input |
-| `free` | optional; `true` means never charge |
-| `name` | optional; display label only |
+| `input` | Rate for ordinary input tokens |
+| `output` | Rate for generated output tokens |
+| `cache_read` | Rate for input served from cache |
+| `cache_write` | Rate for tokens written to cache |
+| `free` | Explicit free classification |
+| `name` | Display label; does not change route identity |
 
-Omitted fields are treated as `0`. Set `cache_read`/`cache_write` to `0` for
-providers that do not bill separately for cache.
+Omitted numeric fields default to zero. Set cache rates according to your
+provider's billing rather than assuming a fixed discount or markup. Different
+cache categories are accounted separately.
 
----
+## Updating public prices
 
-## Pulling prices from models.dev
+**UPDATE CATALOG** downloads public pricing from [models.dev](https://models.dev).
+Startup loads cached or embedded data before refreshing in the background, so
+an unavailable network does not block the application. A refresh failure retains
+usable cached pricing. The catalog-age tooltip shows when it was last updated.
 
-[models.dev](https://models.dev) is the public catalogue OpenCode itself uses.
-Regenerate the shipped table at any time:
+Public refreshes preserve `prices.local.json`. Do not place private rates in
+the public catalog file: they would be replaced by a later refresh.
 
-```powershell
-python tools\gen_prices.py
-```
+## Custom and private rates
 
-```
-fetching https://models.dev/api.json ...
-  anthropic              14 models
-  openai                 48 models
-  ...
-wrote prices.json
-  1062 models (57 free), 27 skipped (no price)
-  reference: anthropic/claude-sonnet-4-5
-```
+Open **REVIEW PRICES** to inspect unknown, estimated and saved custom routes.
+Save the applicable input/output/cache rates, or explicitly mark the exact route
+free. Saved rates can be revisited or reset. Ignoring an unknown route leaves its
+cost uncounted; ignoring an estimated route leaves the estimate in use.
 
-Then click **APPLY LOCAL PRICES** in the app. The new rates apply to future
-messages; completed ledger records remain stable. When the app asks you to
-confirm a specific unknown/private-provider model, saving that explicit local
-override corrects past usage for that model once.
-
-Use **TEST PRICING** to enter synthetic input/output/cache token counts and see
-the effective cost and source. It makes no model request, spends no provider
-credit, and does not add anything to the real ledger.
-
-### Offline / air-gapped
-
-```powershell
-# on a machine with network access
-curl -o api.json https://models.dev/api.json
-
-# then
-python tools\gen_prices.py api.json
-```
-
-### Choosing which providers to include
-
-models.dev carries 200+ providers, most of them niche gateways with
-overlapping model ids. `tools/gen_prices.py` ships a curated list:
-
-```python
-DEFAULT_PROVIDERS = [
-    "anthropic", "openai", "google", "google-vertex", "azure",
-    "amazon-bedrock", "mistral", "deepseek", "xai", "groq",
-    "cerebras", "openrouter", "github-copilot", "opencode",
-    "alibaba", "fireworks-ai", "togetherai", "deepinfra",
-]
-```
-
-Add or remove entries and re-run. Models without a `cost` block are skipped
-rather than assumed free — inventing a price is worse than flagging a gap.
-
----
-
-## Adding custom / private prices
-
-**Do not hand-edit `prices.json` for private rates.** It is regenerated by the
-tool above, which would silently discard your edits. Use an **overlay** instead.
-
-### Setting up an overlay
+For a file-based overlay, copy the repository's
+[example](../prices.local.example.json) into the application data directory:
 
 ```powershell
 Copy-Item prices.local.example.json `
   "$env:LOCALAPPDATA\OpenCodeOdometer\prices.local.json"
 ```
 
-| Platform | Location |
-|---|---|
-| Windows | `%LOCALAPPDATA%\OpenCodeOdometer\prices.local.json` |
-| Linux / macOS | `~/.local/share/opencode-odometer/prices.local.json` |
-
-The overlay is **merged on top of** `prices.json` at startup:
-
-- new keys are **added**
-- existing keys are **overridden**
-- `reference_model`, if present, **wins**
-
-It is gitignored by default, so private commercial rates never reach a
-repository.
-
-### Overlay format
-
-Identical to `prices.json`:
+Add exact route keys and the rates from your provider. For example:
 
 ```json
 {
-  "reference_model": "myhub/claude-sonnet-4-5",
+  "reference_model": "example/paid-model",
   "models": {
-    "myhub/claude-sonnet-4-5": {
-      "name": "Sonnet 4.5 via internal hub",
-      "input": 3.3,
-      "output": 16.5,
-      "cache_read": 0.33,
-      "cache_write": 4.125
+    "example/paid-model": {
+      "name": "Example gateway model",
+      "input": 2.75,
+      "output": 11.0,
+      "cache_read": 0.275,
+      "cache_write": 3.4375
     },
-    "myhub/internal-sovereign": {
-      "name": "Sovereign model",
+    "example/free-model": {
+      "name": "Example free route",
       "free": true,
-      "input": 0, "output": 0, "cache_read": 0, "cache_write": 0
+      "input": 0,
+      "output": 0,
+      "cache_read": 0,
+      "cache_write": 0
     }
   }
 }
 ```
 
-Confirm it loaded — the app prints on startup:
+These are illustrative rates, not current provider prices. Overlay entries
+replace matching catalog rates and add new keys; an overlay `reference_model`
+also takes precedence. Restart Odometer after manual file edits to reload them.
+The UI's save actions apply without a restart.
 
-```
-[prices] overlay: +54 models from prices.local.json
-```
+On Windows, the default data directory is `%LOCALAPPDATA%\OpenCodeOdometer`.
+`OPENCODE_ODOMETER_DIR` overrides it. Use the application's discovery pointer
+to confirm the effective directory. Keep private overlays outside the public
+repository; the example contains no provider credentials.
 
----
+## Free routes and savings
 
-## Working out a reseller markup
+Exact local and catalog entries take precedence in rate lookup. When no exact
+entry exists, naming conventions such as `-free` or `sovereign` can classify a
+route as free before cross-provider estimation. Check your actual route's
+billing and use an exact local override if that convention does not apply.
+Unknown prices and zero provider-reported costs are not proof of free pricing.
 
-Resellers usually apply a **flat multiplier** to upstream list prices. Rather
-than typing dozens of rows, verify the ratio on a handful of models and
-generate the rest.
+Free usage contributes token counts and an estimated **SAVED (FREE)** amount.
+The `reference_model` selects the rates used to value this amount. Set it to a
+paid route that exists in your merged table. The reference resolves from the
+overlay or public table, with a built-in fallback when needed.
 
-Compare a few known models against upstream:
+Savings answer what the recorded usage would cost at reference rates. They are
+not invoice discounts, provider charges or evidence that the reference model
+would use the same number of tokens.
 
-| Model | Your rate | Upstream | Ratio |
-|---|---|---|---|
-| `claude-opus-4-5` | 5.50 / 27.50 | 5.00 / 25.00 | **1.10x** |
-| `gpt-5.1` | 1.38 / 11.00 | 1.25 / 10.00 | **1.10x** |
-| `claude-haiku-4-5` | 1.10 / 5.50 | 1.00 / 5.00 | **1.10x** |
+## Reports and invoice comparison
 
-If the ratio holds across ~10 models, generate the overlay:
+**USAGE → EXPORT PERIOD CSV** exports daily model/provider totals for the selected
+dates, including pricing source and estimated/unknown coverage. The main
+**EXPORT CSV** follows Open sessions, Since reset or All time. Archived summaries
+are labelled rather than presented as full message details.
 
-```python
-import json
-
-MARKUP   = 1.10
-PROVIDER = "myhub"
-UPSTREAM = "anthropic"          # provider to copy rates from
-
-src = json.load(open("prices.json"))["models"]
-out = {}
-for key, m in src.items():
-    prov, mid = key.split("/", 1)
-    if prov != UPSTREAM:
-        continue
-    out[f"{PROVIDER}/{mid}"] = {
-        "name": f"{m.get('name', mid)} (via {PROVIDER})",
-        **{f: round(float(m.get(f) or 0) * MARKUP, 6)
-           for f in ("input", "output", "cache_read", "cache_write")},
-    }
-
-json.dump({"models": out}, open("prices.local.json", "w"), indent=2)
-print(f"wrote {len(out)} models at {MARKUP}x")
-```
-
-> **The markup is inferred, not authoritative.** If your provider prices
-> anything off-pattern, that row needs manual correction. Spot-check against a
-> real invoice — see below.
-
----
-
-## Free and sovereign models
-
-A model is treated as free when **any** of these hold:
-
-- the key ends in `-free`
-- the key contains `sovereign`
-- the entry sets `"free": true`
-- every price field is `0`
-
-Free models never add to the odometer, but their tokens are still counted and
-valued as **savings** against the reference model.
-
----
-
-## The reference model
-
-`reference_model` answers: *"what would this free usage have cost on a paid
-model?"* It drives the **SAVED (FREE)** figure.
-
-Resolution order:
-
-1. `reference_model` from the overlay
-2. `reference_model` from `prices.json`
-3. `anthropic/claude-sonnet-4-5` (built-in fallback)
-4. the most expensive paid model in the table
-
-The app never lets this silently resolve to nothing — a missing reference used
-to zero out savings without any warning.
-
----
-
-## Verifying against a real invoice
-
-Recommended before trusting the numbers:
-
-1. **EXPORT CSV** from the expanded window
-2. Filter to one provider and one billing period
-3. Compare the `cost_usd` total against the invoice
-
-Expect small differences from rounding and from usage outside OpenCode. A
-consistent *ratio* error means a wrong multiplier; a consistent *absolute*
-error usually means a missing cache rate.
-
----
+To compare with an invoice, choose the same dates and provider, then compare
+cost totals and token categories. Consider timezone, rounding, provider-specific
+fees, usage outside OpenCode and any unknown or estimated prices. The report
+identifies older amounts whose dated detail is unavailable.
 
 ## Troubleshooting
 
-**A model shows amber with `?`**
-Its key is not in the table. Click the amber **PRICE TO CONFIRM** control and
-accept/edit the suggested rates, mark the exact model free, or ignore it.
+| Symptom | Check |
+|---|---|
+| Unknown or estimated price | Confirm the exact provider/model key and save the applicable rates under REVIEW PRICES. |
+| Costs differ from the invoice | Compare input, output and cache categories, billing dates, route rates and price-source coverage. |
+| Savings are zero or misleading | Confirm `reference_model` exists and has appropriate paid rates. |
+| Overlay edits have no effect | Check valid JSON, the effective data directory and whether Odometer has reloaded the file. |
+| A route is incorrectly free | Save an exact local entry matching the provider/model key and its billed rates. |
 
-**Costs look ~8x too low**
-`cache_read` / `cache_write` are probably `0`. Cache dominates real traffic.
-
-**Savings show $0.00**
-The reference model is missing or free. Set `reference_model` to a paid model
-that exists in the table.
-
-**Overlay changes have no effect**
-Check the app printed `[prices] overlay: +N models` at startup, and that the
-file is in the data directory — *not* next to the executable.
-
-**Everything reads $0.00**
-`prices.json` failed to load. The app prints `[prices] load failed ...`. Most
-often invalid JSON — a trailing comma will do it.
+For the relationship between pricing and enforcement, see
+[session budgets](BUDGET_RULES.md#enforcement-and-validation-limits).

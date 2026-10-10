@@ -1,31 +1,64 @@
-Automatic budget fallback now interrupts the original turn, selects the configured provider/model and continues the same conversation without a confirmation click. Each open TUI has its own allowance; new TUIs start without a limit.
+# v2.2.0: automatic fallback and usage history
 
-### Changes
+This release adds automatic budget fallback, per-TUI session controls and
+date-based usage reports.
 
-- Compact per-session hard limits, immediate Stop Session, and a cheaper-model picker with separate fallback spending. Free and Keep going fallbacks clearly show no stopping cap.
-- Budget routing is released when its limit is cleared. Active fallback routing explains when OpenCode's `/model` selection is overridden. Deliberate manual Odometer choices remain until replaced or cleared with **Use OpenCode selection**.
-- Continuation preserves the requested scope, depth and completion criteria instead of encouraging an early summary.
-- **Open sessions / Since reset / All time** replace RUN/TRIP/TOTAL. CSV rows and totals use the selected counter's scope.
-- **USAGE** shows Today, this week, month or custom dates, daily consumption, model/provider totals and downloadable period CSVs. Daily archives preserve reporting after message pruning; unavailable older dated detail is identified.
-- Conservative cleanup of old, unreferenced protocol acknowledgements, with storage sizes visible in Usage. Existing telemetry/log limits remain unchanged.
-- Fixed extra session rows caused by Windows reusing old process IDs. Valid quiet TUIs and their limits remain intact.
-- Updated documentation and screenshots. The dock remains 340 × 46; no width increase.
+## Changes
 
-An already dispatched request can overshoot its allowance. Provider failures and uncertain interrupted actions pause continuation with a clear message; existing tool permissions still apply. Artificial Analysis benchmarks are optional and do not require a key for budgets, prices or switching. OpenCode continues to handle Plan/Build routing.
+- Configure a hard allowance for each open TUI. At exhaustion, stop paid work
+  or automatically continue the same conversation on a chosen provider/model.
+- Give paid fallbacks a separate stopping cap or allow them to keep going.
+  Free and uncapped fallbacks display **no cap**, with spending still accounted.
+- Release budget-owned routing when its limit is cleared. Active fallback
+  routing explains when it overrides OpenCode's `/model` selection. Manual
+  Odometer choices retain the **Use OpenCode selection** handoff.
+- Use a continuation prompt that asks the fallback to preserve the task's scope,
+  depth, completion criteria and completed work.
+- Rename display counters to **Open sessions / Since reset / All time** and
+  align exported CSV rows and totals with the selected scope.
+- Add **USAGE** with daily, weekly, monthly and custom date ranges,
+  model/provider breakdowns and period CSV exports. Daily archives preserve
+  accounting after message pruning; unavailable older dated detail is identified.
+- Clean up old, unreferenced terminal protocol files and display storage size.
+- Reject stale TUI presence files when Windows reuses their process IDs,
+  preserving valid quiet TUIs and their limits.
+- Update documentation and screenshots. The compact dock measures 340 × 46.
 
-### Install or upgrade
+An already dispatched request can overshoot its allowance. Provider failures
+and uncertain interrupted actions can pause continuation with a reason;
+existing tool permissions still apply. Benchmark metadata is optional and a
+key is not needed for pricing, budgets or switching. OpenCode handles Plan/Build
+routing.
 
-1. Download **OpenCode_Odometer-v2.2.0.exe** below. Quit the previous Odometer instance before running it.
-2. Run the executable once to install its bundled plugin and remember its location. Saved preferences, pricing and usage history are retained.
-3. If Windows blocks the unsigned file, right-click it → **Properties → Unblock → Apply**, then run it again. If offered, **More info → Run anyway** is another option. Do not disable Windows security. If your managed computer does not offer these options, ask your administrator to approve the executable.
-4. Restart **OpenCode** once to load the updated server and TUI plugins. This opens new TUI entries with no default limits; configure their limits again as needed.
+## Install or upgrade
 
-If you move the executable, run it once from the new location. **Settings → Start with OpenCode** controls automatic launch. **Hide** keeps it running in the tray; restore it from the icon near the Windows clock, including the hidden-icons area.
+1. Download **OpenCode_Odometer-v2.2.0.exe** from the
+   [release page](https://github.com/vivek9102/opencode-odometer/releases/tag/v2.2.0).
+2. Quit the previous Odometer instance and run the new executable once. It
+   installs the bundled plugins and records its location. Saved preferences,
+   pricing and usage history are retained.
+3. If Windows blocks the unsigned file, select **Properties → Unblock → Apply**
+   from its right-click menu, then run it again. If offered, **More info → Run
+   anyway** is another option. On managed computers, ask an administrator to
+   approve the executable if these options are unavailable. Do not disable
+   Windows security.
+4. Restart OpenCode to load the updated server and TUI plugins. Newly opened
+   TUIs start without limits; configure their budgets as needed.
 
-**Platform:** Windows x64. Requires Microsoft WebView2 Runtime, normally included with Windows 11 and current Windows 10. The executable is unsigned. The `.sha256` asset contains its SHA-256 checksum.
+If you move the executable, run it once from its new location. **Settings → Start
+with OpenCode** controls automatic launch. **Hide** keeps the application running
+in the tray; restore it from the icon near the Windows clock.
 
-### Screenshots and validation
+The release targets Windows x64 and requires Microsoft WebView2 Runtime. The
+executable is unsigned; its accompanying `.sha256` asset supplies the checksum.
 
-See the [README gallery](https://github.com/vivek9102/opencode-odometer#screenshots) and [budget and usage documentation](https://github.com/vivek9102/opencode-odometer/blob/main/docs/BUDGET_RULES.md).
+## Documentation and validation
 
-Go tests and vet, plugin regressions, browser checks and isolated native WebView2 checks passed. Two isolated OpenCode 1.14.39 TUIs were checked with a localhost fake provider for fallback continuation, model release, Esc and targeted Stop Session. No live paid provider requests or live budget mutations were used for validation.
+See the [screenshot gallery](../README.md#screenshots),
+[budget guide](BUDGET_RULES.md) and [pricing guide](PRICING.md).
+
+Go tests and vet, plugin regressions, browser checks and isolated native WebView2
+checks passed. Integration checks used two isolated OpenCode 1.14.39 TUIs and a
+localhost fake provider to test continuation, routing release, Esc and targeted
+Stop Session. These checks required no live paid provider requests or changes
+to live budgets; they do not establish compatibility with every provider.
