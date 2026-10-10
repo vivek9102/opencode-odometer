@@ -100,7 +100,7 @@ func (a *App) RefreshOpenSessions() {
 			a.state.OpenSessionsMode = true
 			changed = true
 		}
-		if entry.Closed || !opencode.ProcessAlive(entry.PID) {
+		if entry.Closed || !opencode.ProcessAliveAt(entry.PID, entry.Updated) {
 			delete(a.openTUIs, entry.ID)
 			continue
 		}
@@ -131,7 +131,7 @@ func (a *App) RefreshOpenSessions() {
 		}
 	}
 	for id, entry := range a.openTUIs {
-		if !opencode.ProcessAlive(entry.PID) {
+		if !opencode.ProcessAliveAt(entry.PID, entry.Updated) {
 			delete(a.openTUIs, id)
 		}
 	}
@@ -272,9 +272,9 @@ func (a *App) OpenSessions() []OpenSessionRow {
 	return a.openRowsLocked()
 }
 
-// OpenSessionTotals counts each message once, even when the same conversation
-// is displayed by several TUIs. Closed conversations also leave the dock rate.
-func (a *App) OpenSessionTotals(rows []OpenSessionRow) (float64, float64) {
+// OpenSessionRecords scopes both exports and display totals to currently open
+// TUI roots and their children, counting shared conversations once.
+func (a *App) OpenSessionRecords(rows []OpenSessionRow, records []ledger.Record) []ledger.Record {
 	starts := map[string]string{}
 	for _, row := range rows {
 		if row.SessionID == "" {
@@ -285,16 +285,25 @@ func (a *App) OpenSessionTotals(rows []OpenSessionRow) (float64, float64) {
 			starts[row.SessionID] = start
 		}
 	}
-	ids := map[string]bool{}
-	cost := 0.0
+	selected := []ledger.Record{}
 	a.mu.RLock()
-	for _, rec := range a.Ledger.GetMessagesSnapshot() {
+	for _, rec := range records {
 		if start, ok := starts[budgetRoot(rec.SessionID, a.state.SessionParents)]; ok && rec.Timestamp >= start {
-			ids[rec.MID] = true
-			cost += rec.Cost
+			selected = append(selected, rec)
 		}
 	}
 	a.mu.RUnlock()
+	return selected
+}
+
+// OpenSessionTotals returns scoped dollars and the recent hourly burn rate.
+func (a *App) OpenSessionTotals(rows []OpenSessionRow) (float64, float64) {
+	ids := map[string]bool{}
+	cost := 0.0
+	for _, rec := range a.OpenSessionRecords(rows, a.Ledger.GetMessagesSnapshot()) {
+		ids[rec.MID] = true
+		cost += rec.Cost
+	}
 	cutoff := time.Now().Add(-10 * time.Minute)
 	rate := 0.0
 	a.rateMu.Lock()
@@ -380,10 +389,18 @@ func (a *App) SetOpenSessionBudget(id string, limit float64, mode string, enable
 	a.mu.Unlock()
 	a.PublishBudget()
 	a.SaveState()
-	if restore && p.OriginalModel != "" && entry.SessionID != "" {
-		if _, err := a.RequestModelSwitch(entry.SessionID, p.OriginalModel); err != nil {
-			a.setRuleFailure(id, "Could not restore the original model: "+err.Error())
+	if returnOriginal {
+		released, err := a.releaseBudgetModel(entry.SessionID, p)
+		if err != nil {
 			return err
+		}
+		// Disabled budgets follow OpenCode immediately. An increased allowance
+		// can restore once, without persisting a pin over later picker choices.
+		if restore && enabled && released && p.OriginalModel != "" && entry.SessionID != "" {
+			if _, err := a.requestModelSwitch(entry.SessionID, p.OriginalModel, "budget_restore"); err != nil {
+				a.setRuleFailure(id, "Could not restore the original model: "+err.Error())
+				return err
+			}
 		}
 	}
 	a.ProcessBudgetRules()

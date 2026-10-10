@@ -49,6 +49,7 @@ jobs:
           node --check frontend/dist/experience.js
           node --check frontend/dist/sessions.js
           node --check frontend/dist/budget-rules.js
+          node --check frontend/dist/usage.js
           node --check plugin/event-diagnostics.js
       - name: Plugin regression tests
         run: node --test plugin/*.test.mjs

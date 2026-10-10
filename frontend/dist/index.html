@@ -9,11 +9,11 @@
 <body>
   <!-- ===== COMPACT BAR ===== -->
   <div id="bar" class="view">
-    <div id="bar-odometer" class="odometer-box drag" title="RUN · spending across currently open TUIs · Click to expand"></div>
+    <div id="bar-odometer" class="odometer-box drag" title="Open sessions · spending across currently open TUIs · Click to expand"></div>
     <div id="bar-side" class="drag">
       <div id="bar-rate">$0.00/hr</div>
       <div id="bar-model">idle</div>
-    </div><span id="bar-scope">RUN</span>
+    </div><span id="bar-scope">OPEN</span>
 	<div id="bar-edge" class="hidden"><i></i></div>
     <span id="bar-unpriced" class="bar-warn hidden" title="Some models have no price - spend is not being counted">!</span>
     <button id="bar-expand" class="bar-btn" title="Open spending details" aria-label="Open spending details">&#9650;</button>
@@ -26,7 +26,7 @@
     <div class="fixed-head-region">
       <div class="head drag">
         <span id="bd-mode" class="mode">TRIP</span><button id="bd-reading" class="text-btn" title="Toggle spent / remaining">spent</button>
-		<span id="counter-toggle" class="segments"><button class="ctl" data-counter="RUN">RUN</button><button class="ctl" data-counter="TRIP">TRIP</button><button class="ctl" data-counter="TOTAL">TOTAL</button></span><button id="bd-toggle" class="hidden">TRIP / TOTAL</button><button id="bd-reset" class="ctl">RESET TRIP</button>
+		<span id="counter-toggle" class="segments"><button class="ctl" data-counter="RUN" title="Spend since each currently open TUI started. Falls when a TUI closes.">Open sessions</button><button class="ctl" data-counter="TRIP" title="Global spend since the last counter reset, including closed sessions.">Since reset</button><button class="ctl" data-counter="TOTAL" title="Lifetime spend, including archived message totals.">All time</button></span><button id="bd-toggle" class="hidden">Since reset / All time</button><button id="bd-reset" class="ctl" title="Reset this display counter only; session budgets are kept.">RESET COUNTER</button>
         <span id="bd-status" class="status">saved $0.0000</span>
         <span id="bd-conn" class="conn" title="OpenCode connection">connecting</span>
         <button id="bd-collapse" class="text-btn">&#9660; collapse</button>
@@ -92,6 +92,7 @@
 
       <div class="utility-row">
 		<button id="bd-export" class="ctl utility">EXPORT CSV</button>
+		<button id="bd-usage" class="ctl" title="Daily and weekly consumption and reports">USAGE</button>
 		<button id="bd-update-prices" class="ctl" title="Download the latest catalog for future usage; history stays unchanged">UPDATE CATALOG</button>
 		<button id="bd-unpriced" class="ctl" title="Review estimated or unknown model prices">REVIEW PRICES</button>
 		<button id="bd-switch" class="ctl switch" title="Models for the selected session">MODELS</button>
@@ -212,9 +213,24 @@
       <label><input id="pref-dim" type="checkbox" /> Quiet appearance while idle</label>
       <label><input id="pref-pause" type="checkbox" /> Pause budget enforcement</label>
       <p>Spend continues to count while paused. Resuming keeps the same budget period.</p>
-      <div class="metadata-settings"><strong>Model benchmark metadata</strong><p>Optional Artificial Analysis API key. Stored locally; never included in exports. Models without matched measurements show Not rated.</p><input id="metadata-key" type="password" autocomplete="off" placeholder="Artificial Analysis API key" /><button id="metadata-save" class="ctl">SAVE KEY</button><button id="metadata-refresh" class="ctl">REFRESH METADATA</button><span id="metadata-result" role="status"></span></div>
+      <div class="metadata-settings"><strong>Optional model benchmarks</strong><p>Artificial Analysis provides benchmark scores for model suggestions. Budgets, prices and automatic switching work without this key. Stored locally; never included in exports.</p><input id="metadata-key" type="password" autocomplete="off" placeholder="Artificial Analysis API key (optional)" /><button id="metadata-save" class="ctl">SAVE KEY</button><button id="metadata-refresh" class="ctl">REFRESH METADATA</button><span id="metadata-result" role="status"></span></div>
       <div id="settings-result" role="status"></div>
     </div>
+  </div>
+  <div id="usage-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <section class="modal-content usage-dialog" role="dialog" aria-modal="true" aria-labelledby="usage-title">
+      <div class="modal-header"><h3 id="usage-title">Usage history</h3><button id="usage-close" class="modal-close-btn" aria-label="Close usage history">&times;</button></div>
+      <p class="modal-sub">Daily consumption across all sessions, including closed sessions.</p>
+      <div class="usage-controls"><label>Period <select id="usage-period"><option value="today">Today</option><option value="week" selected>This week</option><option value="month">This month</option><option value="custom">Custom dates</option></select></label><label>From <input id="usage-start" type="date" /></label><label>To <input id="usage-end" type="date" /></label><button id="usage-apply" class="ctl">SHOW</button></div>
+      <p id="usage-calendar" class="session-note"></p>
+      <div id="usage-summary" class="usage-summary"></div>
+      <div id="usage-chart" class="usage-chart" role="img" aria-label="Daily consumption"></div>
+      <p id="usage-coverage" class="session-note" role="status"></p>
+      <div class="usage-table-wrap"><table><thead><tr><th>MODEL / PROVIDER</th><th class="num">MESSAGES</th><th class="num">TOKENS</th><th class="num">SPEND</th></tr></thead><tbody id="usage-rows"></tbody></table></div>
+      <p id="usage-storage" class="session-note"></p>
+      <div class="usage-footer"><span id="usage-result" role="status"></span><button id="usage-export" class="ctl raise">EXPORT PERIOD CSV</button></div>
+    </section>
   </div>
   <!-- ===== RIGHT-CLICK CONTEXT MENU ===== -->
   <div id="menu" class="ctxmenu hidden"></div>
@@ -230,5 +246,6 @@
   <script src="main.js"></script>
   <script src="experience.js"></script>
   <script src="budget-rules.js"></script>
+  <script src="usage.js"></script>
 </body>
 </html>

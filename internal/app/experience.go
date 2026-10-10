@@ -264,9 +264,14 @@ type ModelSwitch struct {
 	Issued     int64  `json:"issued"`
 	MessageID  string `json:"message_id,omitempty"`
 	Persistent bool   `json:"persistent,omitempty"`
+	Source     string `json:"source,omitempty"`
 }
 
 func (a *App) RequestModelSwitch(sid, key string) (ModelSwitch, error) {
+	return a.requestModelSwitch(sid, key, "manual")
+}
+
+func (a *App) requestModelSwitch(sid, key, source string) (ModelSwitch, error) {
 	if sid == "" {
 		return ModelSwitch{}, fmt.Errorf("no active chat; start a chat in OpenCode first")
 	}
@@ -309,7 +314,10 @@ func (a *App) RequestModelSwitch(sid, key string) (ModelSwitch, error) {
 	var previous ModelSwitch
 	old, _ := os.ReadFile(target)
 	_ = json.Unmarshal(old, &previous)
-	req := ModelSwitch{ID: fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()), SessionID: sid, Key: key, Persistent: true, Status: "queued", Detail: "Selected for this chat, starting with your next message. Stays active until you choose another model or Follow OpenCode.", Issued: time.Now().Unix()}
+	req := ModelSwitch{ID: fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()), SessionID: sid, Key: key, Source: source, Persistent: source == "manual", Status: "queued", Detail: "Selected for this chat, starting with your next message. Stays active until you choose another model or Follow OpenCode.", Issued: time.Now().Unix()}
+	if source == "budget_restore" {
+		req.Detail = "Original allowance restored. OpenCode's next explicit model choice takes precedence."
+	}
 	b, _ := json.Marshal(req)
 	// Publish acknowledgment before the request: a fast prompt must never have
 	// its applied/confirmed status overwritten by the queued status.

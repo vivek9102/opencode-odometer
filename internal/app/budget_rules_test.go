@@ -202,8 +202,12 @@ func TestLimitRestoresOriginalAndFreshFallbackWithoutLosingHistory(t *testing.T)
 			if total, _ := a.OpenSessionTotals(a.OpenSessions()); total != .23 {
 				t.Fatal("history lost", total)
 			}
-			if pending := a.PendingModelSwitch("chat-one"); pending.Key != "acme/sonnet" {
-				t.Fatal("original model not restored", pending)
+			pending := a.PendingModelSwitch("chat-one")
+			if clear && pending.ID != "" {
+				t.Fatal("disabled budget still pins a model", pending)
+			}
+			if !clear && (pending.Key != "acme/sonnet" || pending.Persistent || pending.Source != "budget_restore") {
+				t.Fatal("restoration must be scoped to one request", pending)
 			}
 			if clear {
 				if err := a.SetOpenSessionBudget("one", .5, "hard", true); err != nil {

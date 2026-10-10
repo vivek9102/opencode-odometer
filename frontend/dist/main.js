@@ -3,6 +3,7 @@
 
 const Svc = () => window.go.wservice.Service;
 const $ = (id) => document.getElementById(id);
+function counterLabel(view) { return {RUN:'Open sessions',TRIP:'Since reset',TOTAL:'All time'}[view]||view; }
 
 const MODE_TIP = {
   warn: "warn  - never blocks, toast only",
@@ -206,7 +207,8 @@ function render(snap) {
 	 renderSessionDock(snap);
 
   // board
-  $("bd-mode").textContent = snap.view;
+  $("bd-mode").textContent = counterLabel(snap.view);
+  $("bd-export").title = "Export " + counterLabel(snap.view) + " spending. Archived values are labelled summaries.";
   $("bd-mode").style.color = snap.view !== "TOTAL" ? "var(--green)" : "var(--red)";
   $("bd-reset").classList.toggle("hidden",snap.view!=="TRIP");
   document.querySelectorAll("[data-counter]").forEach(e=>e.classList.toggle("on",e.dataset.counter===snap.view));
@@ -394,8 +396,8 @@ $("bd-mode-sel").addEventListener("mouseleave", hideTip);
 
 $("bd-toggle").addEventListener("click", () => Svc().ToggleViewMode());
 $("bd-reset").addEventListener("click", () => {
-  if (confirm("Reset the trip counter? Lifetime totals are kept.")) {
-    Svc().ResetTrip().then(() => toast("Trip reset", "ok"));
+  if (confirm("Reset the spending counter to zero? All-time history and session budgets are kept.")) {
+    Svc().ResetTrip().then(() => toast("Spending counter reset; session budgets kept", "ok"));
   }
 });
 // Download the latest catalogue for future messages. Recorded history remains
@@ -977,9 +979,9 @@ function openMenu(x, y) {
     menu.appendChild(menuItem("Reset position (bottom centre)",
       () => Svc().SetDock("bottom-center").then(() => toast("Docked bottom-centre", "ok"))));
     menu.appendChild(menuSep());
-    for(const view of ["RUN","TRIP","TOTAL"])menu.appendChild(menuItem("Show "+view, () => Svc().SetCounter(view)));
-    if(snapshot?.view==="TRIP")menu.appendChild(menuItem("Reset trip", () => {
-      if (confirm("Reset the trip counter?")) Svc().ResetTrip();
+    for(const view of ["RUN","TRIP","TOTAL"])menu.appendChild(menuItem("Show "+counterLabel(view), () => Svc().SetCounter(view)));
+    if(snapshot?.view==="TRIP")menu.appendChild(menuItem("Reset spending counter", () => {
+      if (confirm("Reset the spending counter? Session budgets are kept.")) Svc().ResetTrip();
     }));
     menu.appendChild(menuItem("Switch model", openModelModal));
     menu.appendChild(menuItem("Settings…", openSettings));

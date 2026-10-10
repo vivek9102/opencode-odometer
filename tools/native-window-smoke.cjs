@@ -48,6 +48,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   await page.locator('#bd-limit').fill('.20');await page.locator('#bd-enabled').click();
   await page.waitForFunction(()=>snapshot.open_sessions[0]?.enabled,{},{polling:100});
   assert.ok(await page.locator('#bd-enabled').isChecked());
+  await page.locator('#bd-usage').click();await page.waitForFunction(()=>!document.getElementById('usage-export').disabled);
+  const usage=await page.locator('.usage-dialog').boundingBox(),viewport=await page.evaluate(()=>({width:innerWidth,height:innerHeight}));assert.ok(usage.x>=0&&usage.y>=0&&usage.x+usage.width<=viewport.width+1&&usage.y+usage.height<=viewport.height+1,'native usage panel overflows');
+  await page.screenshot({path:join(root,'native-usage.png')});await page.locator('#usage-close').click();
   await page.locator('#bd-dock').click();await page.waitForFunction(()=>snapshot.compact&&innerWidth===340&&innerHeight===46,{},{polling:100});
   assert.equal(await page.locator('#bar-model').innerText(),'1 session · all within budget');
   for(let i=0;i<3;i++){

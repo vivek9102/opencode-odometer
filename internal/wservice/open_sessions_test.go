@@ -35,9 +35,9 @@ func TestOpenSessionSelectionAndClosedFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range []ledger.Record{
-		{MID: "one", SessionID: "chat-one", Provider: "mock", Model: "one", Cost: .2},
+		{MID: "one", SessionID: "chat-one", Provider: "mock", Model: "one", Cost: .2, Saved: 2},
 		{MID: "two", SessionID: "chat-two", Provider: "mock", Model: "two", Cost: 1.1},
-		{MID: "history", SessionID: "closed-chat", Provider: "mock", Model: "old", Cost: 9},
+		{MID: "history", SessionID: "closed-chat", Provider: "mock", Model: "old", Cost: 9, Saved: 20},
 	} {
 		r.Timestamp = time.Now().Format("2006-01-02 15:04:05")
 		core.Ledger.Put(r)
@@ -53,6 +53,9 @@ func TestOpenSessionSelectionAndClosedFallback(t *testing.T) {
 	run := svc.Snapshot()
 	if run.View != "RUN" || run.Cost != run.OpenCost || run.Limit != 1 || run.SessionCost != 1.1 {
 		t.Fatalf("RUN differs from dock or changed the selected policy: %+v", run)
+	}
+	if run.Saved != 2 {
+		t.Fatal("open-session savings included closed history", run.Saved)
 	}
 	svc.SetCounter("TOTAL")
 	total := svc.Snapshot()

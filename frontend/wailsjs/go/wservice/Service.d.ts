@@ -33,6 +33,8 @@ export function Docks():Promise<Array<string>>;
 
 export function ExportCsv():Promise<string>;
 
+export function ExportUsageCsv(arg1:string,arg2:string):Promise<string>;
+
 export function FallbackModels(arg1:string):Promise<Array<app.FallbackChoice>>;
 
 export function HasMetadataKey():Promise<boolean>;
@@ -130,3 +132,5 @@ export function TogglePause():Promise<void>;
 export function ToggleViewMode():Promise<void>;
 
 export function UnlockSession(arg1:string,arg2:string):Promise<void>;
+
+export function UsageReport(arg1:string,arg2:string):Promise<app.UsageReport>;

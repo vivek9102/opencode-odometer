@@ -7,6 +7,8 @@ import (
 	"syscall"
 )
 
+func processAliveAt(pid int, heartbeat int64) bool { return processAlive(pid) }
+
 // processAlive reports whether a PID belongs to a running process.
 //
 // Signal 0 performs the permission and existence checks without delivering a

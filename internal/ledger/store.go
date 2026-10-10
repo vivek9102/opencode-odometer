@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 )
 
 // Record is a single priced assistant message.
@@ -47,6 +48,11 @@ type Store struct {
 	PrunedSaved   float64                 `json:"pruned_saved"`
 	PerModel      map[string]*ModelStat   `json:"per_model"`
 	PerSession    map[string]*SessionStat `json:"per_session"`
+	Archived      map[string]UsageBucket  `json:"daily_archive,omitempty"`
+	PrunedIDs     map[string]bool         `json:"pruned_ids,omitempty"`
+	TripStarted   string                  `json:"trip_started,omitempty"`
+	TripBaseline  map[string]Record       `json:"trip_records,omitempty"`
+	TripArchived  Record                  `json:"trip_archived,omitempty"`
 }
 
 // ModelStat aggregates spend for a single "provider/model" key.
@@ -109,6 +115,10 @@ func (s *Store) Put(rec Record) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Archived rows are immutable. History backfill must not charge them again.
+	if s.PrunedIDs[rec.MID] {
+		return false
+	}
 
 	prev, exists := s.Messages[rec.MID]
 	changed := !exists ||
@@ -123,6 +133,7 @@ func (s *Store) Put(rec Record) bool {
 		prev.Estimated != rec.Estimated ||
 		prev.CostSource != rec.CostSource ||
 		prev.ReportedCost != rec.ReportedCost
+	changed = changed || prev.Reasoning != rec.Reasoning || prev.Provider != rec.Provider || prev.Model != rec.Model || prev.Timestamp != rec.Timestamp
 	s.Messages[rec.MID] = rec
 	if changed {
 		s.recomputeLocked()
@@ -166,6 +177,12 @@ func (s *Store) ResetTrip() {
 
 	s.TripBase = s.TotalCost
 	s.TripSavedBase = s.TotalSaved
+	s.TripStarted = time.Now().Format(time.RFC3339)
+	s.TripBaseline = make(map[string]Record, len(s.Messages))
+	for id, rec := range s.Messages {
+		s.TripBaseline[id] = rec
+	}
+	s.TripArchived = Record{}
 	s.TripCost = 0
 	s.TripSaved = 0
 	s.recomputeLocked()
@@ -297,6 +314,25 @@ func (s *Store) PruneKeeping(max int, keep map[string]bool) int {
 	}
 	for _, id := range ids[:drop] {
 		rec := s.Messages[id]
+		if s.Archived == nil {
+			s.Archived = map[string]UsageBucket{}
+		}
+		if s.PrunedIDs == nil {
+			s.PrunedIDs = map[string]bool{}
+		}
+		bucket := bucketFor(rec)
+		key := bucketKey(bucket)
+		previous := s.Archived[key]
+		previous.Date, previous.Provider, previous.Model, previous.Source = bucket.Date, bucket.Provider, bucket.Model, bucket.Source
+		previous.Free, previous.Estimated, previous.Unknown = bucket.Free, bucket.Estimated, bucket.Unknown
+		previous.add(bucket)
+		s.Archived[key] = previous
+		s.PrunedIDs[id] = true
+		if s.TripStarted != "" {
+			delta := recordDelta(rec, s.TripBaseline[id])
+			addRecord(&s.TripArchived, delta)
+			delete(s.TripBaseline, id)
+		}
 		s.PrunedCost += rec.Cost
 		s.PrunedSaved += rec.Saved
 		delete(s.Messages, id)
@@ -441,9 +477,23 @@ func (s *Store) Copy() *Store {
 		Messages:      make(map[string]Record, len(s.Messages)),
 		PerModel:      make(map[string]*ModelStat, len(s.PerModel)),
 		PerSession:    make(map[string]*SessionStat, len(s.PerSession)),
+		Archived:      make(map[string]UsageBucket, len(s.Archived)),
+		PrunedIDs:     make(map[string]bool, len(s.PrunedIDs)),
+		TripStarted:   s.TripStarted,
+		TripBaseline:  make(map[string]Record, len(s.TripBaseline)),
+		TripArchived:  s.TripArchived,
 	}
 	for k, v := range s.Messages {
 		cp.Messages[k] = v
+	}
+	for k, v := range s.Archived {
+		cp.Archived[k] = v
+	}
+	for k, v := range s.PrunedIDs {
+		cp.PrunedIDs[k] = v
+	}
+	for k, v := range s.TripBaseline {
+		cp.TripBaseline[k] = v
 	}
 	for k, v := range s.PerModel {
 		val := *v

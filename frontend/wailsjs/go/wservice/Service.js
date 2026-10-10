@@ -58,6 +58,10 @@ export function ExportCsv() {
   return window['go']['wservice']['Service']['ExportCsv']();
 }
 
+export function ExportUsageCsv(arg1, arg2) {
+  return window['go']['wservice']['Service']['ExportUsageCsv'](arg1, arg2);
+}
+
 export function FallbackModels(arg1) {
   return window['go']['wservice']['Service']['FallbackModels'](arg1);
 }
@@ -252,4 +256,8 @@ export function ToggleViewMode() {
 
 export function UnlockSession(arg1, arg2) {
   return window['go']['wservice']['Service']['UnlockSession'](arg1, arg2);
+}
+
+export function UsageReport(arg1, arg2) {
+  return window['go']['wservice']['Service']['UsageReport'](arg1, arg2);
 }

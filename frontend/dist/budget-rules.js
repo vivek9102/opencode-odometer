@@ -28,7 +28,7 @@ function updateFallbackChain(){
   $("fallback-free-note").classList.toggle("hidden",!free);
   document.querySelectorAll("[data-then]").forEach(e=>{e.classList.toggle("on",e.dataset.then===draft.then);e.setAttribute("aria-pressed",String(e.dataset.then===draft.then));});
   const first=`Use ${bareModel(row.original_model||row.model)||"the original model"} until ${ruleMoney(row.limit)}, then ${m?.name||"the fallback"}`;
-  $("fallback-chain").textContent=!m?"Choose the model to use after your limit is reached.":free?`${first} for free, with no spending cap.`:draft.then==="go"?`${first}. Keep going even after its ${ruleMoney(draft.fallback_limit)} budget is used up.`:`${first} with an extra ${ruleMoney(draft.fallback_limit)}. Stop when that budget is used up.`;
+  $("fallback-chain").textContent=!m?"Choose the model to use after your limit is reached.":free?`${first} for free, with no spending cap.`:draft.then==="go"?`${first} with no stopping cap. Paid usage continues to be counted.`:`${first} with an extra ${ruleMoney(draft.fallback_limit)}. Stop when that budget is used up.`;
   $("save-rule").disabled=fallbackSaving||!m||m.eligible===false||!row.enabled;
 }
 function paintFallbackModels(){
@@ -84,7 +84,7 @@ function renderBudgetRules(snap){
     else if(row.stopped)note.textContent=`Stopped at ${ruleMoney(row.on_fallback?row.fallback_limit:row.limit)}. Raise or clear the limit to continue.`;
     else if(row.rule==="switch"&&row.fallback_model){
       const [provider,...parts]=row.fallback_model.split("/");
-      note.textContent=`${row.on_fallback?"Using":"Switches to"} ${parts.join("/")} [${provider}]${row.on_fallback?"":" at "+ruleMoney(row.limit)}${row.fallback_free?" (free, no cap).":row.then==="go"?`. Keeps going after its ${ruleMoney(row.fallback_limit)} budget is used up.`:` for up to ${ruleMoney(row.fallback_limit)}, then stop.`} `;
+      note.textContent=`${row.on_fallback?"Using":"Switches to"} ${parts.join("/")} [${provider}]${row.on_fallback?"":" at "+ruleMoney(row.limit)}${row.fallback_free?" (free, no cap).":row.then==="go"?" with no stopping cap. Paid usage is counted.":` for up to ${ruleMoney(row.fallback_limit)}, then stop.`} `;
       const change=document.createElement("button");change.type="button";change.className="text-btn";change.textContent="Change";change.addEventListener("click",openBudgetPicker);note.append(change);
     }else note.textContent=row.enabled?`Paid requests are blocked at ${ruleMoney(row.limit)}. Raise the limit to continue.`:"No limit set. New sessions start without a limit.";
   }

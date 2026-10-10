@@ -28,7 +28,7 @@ const read=p=>{try{return JSON.parse(readFileSync(p))}catch{return null}};
  const originalTitle=api.renderer.setTerminalTitle.bind(api.renderer);api.renderer.setTerminalTitle=title=>{if(title.startsWith('OC | '))writeFileSync(join(dir,'title.json'),JSON.stringify({title}));return originalTitle(title);};
  const timer=setInterval(async()=>{if(busy)return;let cmd;try{cmd=JSON.parse(readFileSync(join(dir,'command.json')));rmSync(join(dir,'command.json'));}catch{return;}busy=true;try{let result;
  if(cmd.action==='create'){const response=await api.client.session.create({title:'Synthetic smoke '+process.env.ODO_SMOKE_NUMBER});if(response.error)throw Error(JSON.stringify(response.error));result=response.data;api.route.navigate('session',{sessionID:result.id});}
- if(cmd.action==='prompt'){result=await api.client.session.prompt({sessionID:cmd.sid,model:{providerID:'smoke',modelID:'paid'},parts:[{type:'text',text:'Reply with LOCAL MOCK OK; do not use tools.'}]});}
+ if(cmd.action==='prompt'){result=await api.client.session.prompt({sessionID:cmd.sid,model:{providerID:'smoke',modelID:cmd.model||'paid'},parts:[{type:'text',text:'Reply with LOCAL MOCK OK; do not use tools.'}]});}
  if(cmd.action==='stop'){result=await api.client.session.abort({sessionID:cmd.sid});}
  if(cmd.action==='native-prompt'){api.ui.dialog.clear();await new Promise(r=>setTimeout(r,200));await api.client.tui.appendPrompt({text:'Reply with LOCAL MOCK OK; do not use tools.'});await new Promise(r=>setTimeout(r,200));api.command.trigger('prompt.submit');result={route:api.route.current};}
  if(cmd.action==='escape'){api.renderer.keyInput.emit('keypress',{name:'escape',sequence:'\u001b',ctrl:false,shift:false,meta:false,defaultPrevented:false,propagationStopped:false,preventDefault(){this.defaultPrevented=true},stopPropagation(){this.propagationStopped=true}});result={route:api.route.current};}
@@ -123,6 +123,12 @@ const read=p=>{try{return JSON.parse(readFileSync(p))}catch{return null}};
   Object.assign(budget.sessions[chat1.id],{state:'over',cost:.1,fraction:1});publish();const beforeCap=requested;
   const capped=await command(one,'fallback-capped','prompt',{sid:chat1.id});assert.equal(capped.data?.info?.error?.name,'MessageAbortedError');assert.equal(requested,beforeCap,'exhausted fallback reached provider');
   const uncapped=await command(two,'fallback-other','prompt',{sid:chat2.id});assert.ok(!uncapped.data?.info?.error);assert.equal(uncapped.data?.info?.modelID,'cheap');
+  // Clearing one exhausted budget must release its routing, without changing
+  // the independent fallback in the other TUI. Leave the old file in place to
+  // prove the plugin rejects a late/stale generation on subsequent requests.
+  delete budget.sessions[chat1.id];publish();holding=false;
+  for(let i=0;i<2;i++){const result=await command(one,'released-native-'+i,'prompt',{sid:chat1.id,model:'paid'});assert.ok(!result.data?.info?.error,JSON.stringify(result));assert.equal(result.data?.info?.modelID,'paid','released budget still overrides explicit model choice');}
+  const otherStillFallback=await command(two,'fallback-after-release','prompt',{sid:chat2.id});assert.equal(otherStillFallback.data?.info?.modelID,'cheap');
   await command(one,'exit','exit');await until(()=>reports().find(r=>r.id===row1.id)?.closed,'normal exit tombstone');assert.equal(reports().find(r=>r.id===row2.id).closed,false);
   const summary={success:true,version:read(join(two.config,'loaded.json')).version,twoRealTUIs:true,twoAutomaticFallbacksConfirmed:true,effectiveRoutingVisible:true,independentFallbackCaps:true,registeredCompanion:true,beforeFirstChat:true,uniqueVisibleNames:true,nativeFollowupsKeepConversation:true,nativeEscapeInterrupts:true,paidBlockedBeforeProvider:true,otherTUIUntouched:true,targetedStopAcknowledged:true,onlySelectedStreamStopped:true,normalCloseReported:true,root};writeFileSync(join(root,'summary.json'),JSON.stringify(summary,null,2));console.log(JSON.stringify(summary));
  }finally{

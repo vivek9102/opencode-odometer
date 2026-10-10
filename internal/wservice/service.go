@@ -357,6 +357,10 @@ func (s *Service) snapshot() *Snapshot {
 	snap.OpenCost, snap.OpenRate = a.OpenSessionTotals(openRows)
 	if view == "RUN" {
 		snap.Cost = snap.OpenCost
+		snap.Saved = 0
+		for _, rec := range a.OpenSessionRecords(openRows, a.Ledger.GetMessagesSnapshot()) {
+			snap.Saved += rec.Saved
+		}
 	}
 	for _, row := range openRows {
 		if row.ID == selected {

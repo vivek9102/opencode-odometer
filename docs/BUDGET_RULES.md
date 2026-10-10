@@ -2,15 +2,16 @@
 
 This implements the supplied multi-session spec with the agreed changes: switch
 at exhaustion (100%, not 95%), stop and continue through OpenCode's API, and show
-configured routes with their input/output prices. It is ready for local review;
-these changes have not been committed or pushed.
+configured routes with their input/output prices. These changes ship in v2.2.0.
+Earlier preview notes below retain the implementation and validation history.
 
 ## Counters and budgets
 
-The compact dock remains **340 × 46** and always shows **RUN**: usage for currently
+The compact dock remains **340 × 46** and always shows **Open sessions**: usage for currently
 open conversations since their TUIs opened. Duplicate TUIs do not double-count a
-conversation. The expanded panel labels **RUN / TRIP / TOTAL** explicitly. Reset
-Trip appears only on TRIP. Counter changes and widget restarts preserve budgets.
+conversation. The expanded panel labels **Open sessions / Since reset / All time**.
+Reset Counter appears only on Since reset. The internal RUN/TRIP/TOTAL keys stay
+compatible with saved state. Counter changes and widget restarts preserve budgets.
 
 An open TUI starts without a limit. Aggregate spending is counted from TUI startup;
 the selected allowance starts at zero when ENABLE is turned on. Changing the
@@ -19,6 +20,10 @@ a fresh allowance without erasing historical charges. Every open-TUI allowance i
 without grace turns. Closing the TUI removes its rule and limit, retaining ledger
 history. Delegated child conversations share their parent's rule.
 
+On Windows, presence also checks process creation time against its heartbeat.
+An old presence file cannot become an open TUI when Windows reuses its PID.
+Quiet sessions are retained when the same process still exists.
+
 **Stop at limit** saves immediately. **Switch to a cheaper model…** opens a draft
 popup: select a fallback and press **Switch at limit** to apply it. Cancel, X,
 Escape and backdrop clicks discard the draft. A paid fallback has its own **Extra
@@ -26,6 +31,13 @@ budget** and **After that: Stop / Keep going**
 choice. Keep going explicitly allows subsequent fallback requests after that
 allowance is spent. A confirmed free route has no paid cap. Unknown SDK prices do
 not establish that a route is free.
+
+Once on fallback, the original allowance is labelled as completed history.
+Free and Keep going fallbacks show spend with no stopping cap or progress bar;
+capped Stop fallbacks show their separate progress. The dock indicator follows
+the current fallback allowance rather than the exhausted original allowance.
+An active fallback controls routing, so clearing the limit releases it to
+OpenCode's /model selection. A Stop at limit budget alone does not pin a model.
 
 The five dock states are healthy, unlimited, near (75%), fallback and stopped.
 The worst session drives the caption, independently of the footer selection.
@@ -372,3 +384,80 @@ require no confirmation click. Existing saved conversations can be reopened.
 | `tools/model-switch-smoke.cjs`, `multi-session-ui-smoke.cjs` | Real OpenCode cancellation/continuation and browser interaction/layout checks. |
 | `.gitignore`, `.github/workflows/ci.yml`, `CONTRIBUTING.md`, `README.md`, `docs/` | Protect runtime/key files, add syntax checks, document the new behaviour and review evidence. |
 | `frontend/wailsjs/` | Wails-generated service and model bindings. |
+
+### Reporting, routing release and wording (v8)
+
+Budget fallback selections now carry a source and generation. Clearing an
+allowance removes its route; raising it can queue a one-request restoration,
+which yields to a different explicit OpenCode choice. Tagged manual Odometer
+choices remain deliberate pins. Startup releases legacy restoration files
+matching an inactive switch policy. A late fallback file with an obsolete
+generation cannot pin later requests or advertise routing in the TUI.
+
+The automatic continuation prompt preserves requested scope, depth, deliverables
+and completion criteria. It explicitly rejects concluding early or replacing
+unfinished work with a summary because of the model change. This guides the
+fallback; response quality still depends on the chosen model.
+
+**USAGE** adds Today, a Monday-start week, month and custom calendar ranges,
+daily bars, route totals, pricing coverage and period CSV. Before pruning detail,
+the ledger archives date/model/pricing facts and retains a small message-ID index
+to reject history replay. Retained messages still upsert, so streaming cost
+updates count once. Archived accounting is immutable. Existing undated lifetime
+totals are disclosed and excluded from dated reports; they are not assigned to
+invented dates. The ID index and daily buckets grow with history, and their
+actual ledger size is visible in the Usage panel.
+
+Counter CSVs match their scope: open roots/children counted once; message deltas
+since reset, including streams already underway; or retained plus archived
+lifetime summaries. Legacy scalar reset baselines export a labelled period
+summary until a new reset captures detail. Data rows and footer use the same
+snapshot. Resetting the display counter does not alter budgets.
+
+Hourly cleanup removes only unreferenced terminal acknowledgements and closed
+presence/inventory files older than seven days. It preserves live processes,
+referenced owners, outstanding commands, budgets, ledgers, exports, malformed
+files and unread telemetry. The existing spool/log limits are unchanged.
+Hidden-mode behaviour and Plan/Build routing were left as requested.
+
+Validation passed: Go core tests and vet, plugin regressions, scoped CSV and
+restart/prune accounting tests, cleanup protections, browser flows, and native
+WebView2 layout/Usage/dock/notification/minimise checks. Two real isolated
+OpenCode 1.14.39 TUIs continued on fallback; one exhausted budget was released,
+then two explicit model selections succeeded while the other stayed on fallback.
+Native Esc and targeted STOP still passed. All inference used a localhost fake
+provider. No live budgets were changed or paid provider requests submitted.
+
+The v8 and v9 previews were built with Wails and their copied SHA256 verified.
+The release executable is `OpenCode_Odometer-v2.2.0.exe`. Close the older widget,
+run the new executable once, then restart OpenCode to load the updated plugins.
+Restarting OpenCode creates new TUI entries without limits; saved settings and
+usage history are retained.
+
+### Session presence and fallback display (v9)
+
+Windows process IDs can be reused. Presence now rejects a file whose heartbeat
+predates the running process's creation time, preventing old TUIs from appearing
+again. It retains quiet TUIs belonging to the same process. Tests cover repeated
+polling and preservation of another TUI's budget. A read-only live check retained
+two current TUIs and rejected a stale file belonging to a reused PID.
+
+The original allowance is labelled separately after fallback. Only a paid Stop
+fallback displays a cap and progress bar. Free and Keep going fallbacks display
+no cap, while paid usage is still counted. The dock uses the active allowance.
+An active fallback explains that clearing its limit releases routing to
+OpenCode's /model selection. A Stop at limit policy alone does not pin routing.
+
+The following screenshots use demo sessions and synthetic spending:
+
+![Paid fallback with its own stopping cap](screenshots/fallback-capped.png)
+
+![Keep going fallback with no stopping cap](screenshots/fallback-uncapped.png)
+
+![Free fallback with no cap](screenshots/fallback-free.png)
+
+![Daily usage report with a custom date range](screenshots/usage-history.png)
+
+Go tests and vet, both browser smoke checks and the v9 Wails build passed.
+The approved dock width and height remain 340 × 46. No live budget or inference
+was changed during this verification.

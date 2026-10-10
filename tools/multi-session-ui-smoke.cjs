@@ -27,12 +27,26 @@ const {join}=require('node:path');
    StopOpenSession:async id=>{calls.push(['stop',id]);},SetPreferences:async p=>{testSnap.preferences=p;emit();},
    UnpricedModels:async()=>[],PendingPrices:async()=>[],PendingPriceSuggestions:async()=>[],PricesAgeHours:async()=>0,
    AvailableModels:async()=>[],PendingModelSwitch:async()=>({}),ToggleViewMode:async()=>{},ResetTrip:async()=>{},RefreshPrices:async()=>'',HideToTray:async()=>{},ExportCsv:async()=>'',
+   UsageReport:async(start,end)=>{calls.push(['usage',start,end]);if(start>end)throw Error('Choose an end date after the start.');const rows=[{date:'2026-10-05',provider:'mock',model:'paid',cost:.4,saved:0,messages:3,input:200,output:80,cache_read:20,cache_write:0,estimated:true},{date:'2026-10-10',provider:'mock',model:'paid',cost:.25,saved:0,messages:2,input:100,output:30,cache_read:0,cache_write:0},{date:'2026-10-10',provider:'mock',model:'free',cost:0,saved:1,messages:1,input:50,output:20,cache_read:0,cache_write:0,free:true}].filter(r=>r.date>=start&&r.date<=end);return{start,end,rows,calendar:'Local calendar dates captured at ingestion; weeks start Monday',first_date:'2026-10-05',cost:rows.reduce((n,r)=>n+r.cost,0),messages:rows.reduce((n,r)=>n+r.messages,0),tokens:rows.reduce((n,r)=>n+r.input+r.output+r.cache_read,0),free_messages:rows.filter(r=>r.free).length,estimated_cost:rows.filter(r=>r.estimated).reduce((n,r)=>n+r.cost,0),unallocated_cost:2,unknown_messages:0,storage:{ledger_bytes:1048576,telemetry_bytes:2048,protocol_bytes:1024,export_bytes:1024,retained_messages:20,archived_days:60}};},
+   ExportUsageCsv:async(start,end)=>{calls.push(['usage-export',start,end]);return 'test-export.csv';},
   }}};
  });
  try{
   await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.locator('.session-row').first().waitFor();
   assert.equal(await page.locator('.session-row').count(),3);assert.equal(await page.locator('#selected-name').innerText(),'auth-refactor');
-  assert.equal(await page.locator('.utility-row button:visible').count(),7,'requested footer action missing');
+  assert.equal(await page.locator('.utility-row button:visible').count(),8,'requested footer action missing');
+  assert.deepEqual(await page.locator('[data-counter]').allTextContents(),['Open sessions','Since reset','All time']);
+  await page.locator('#bd-usage').click();await page.locator('#usage-period').selectOption('custom');
+  await page.locator('#usage-start').fill('2026-10-05');await page.locator('#usage-end').fill('2026-10-10');await page.locator('#usage-apply').click();
+  await page.waitForFunction(()=>document.getElementById('usage-summary').textContent.includes('$0.6500'));
+  assert.equal(await page.locator('#usage-rows tr').count(),2);
+  assert.match(await page.locator('#usage-coverage').innerText(),/older lifetime spend/);
+  await page.locator('#usage-export').click();await page.waitForFunction(()=>calls.some(c=>c[0]==='usage-export'));
+  assert.deepEqual(await page.evaluate(()=>calls.find(c=>c[0]==='usage-export')),['usage-export','2026-10-05','2026-10-10']);
+  const usageBounds=await page.locator('.usage-dialog').boundingBox();assert.ok(usageBounds.x>=0&&usageBounds.x+usageBounds.width<=800&&usageBounds.y>=0&&usageBounds.y+usageBounds.height<=780,'usage panel overflows original window');
+  await page.screenshot({path:join(out,'usage-history.png')});
+  await page.locator('#usage-end').fill('2026-10-04');await page.locator('#usage-apply').click();await page.waitForFunction(()=>document.getElementById('usage-result').textContent.includes('after the start'));assert.equal(await page.locator('#usage-export').isDisabled(),true);
+  await page.keyboard.press('Escape');assert.equal(await page.locator('#usage-modal').isVisible(),false);
   const globalDigits=await page.locator('#bd-odometer').innerText();
   await page.evaluate(()=>{testSnap.preferences.remaining=true;render(testSnap);});
   assert.equal(await page.locator('#bd-odometer').innerText(),globalDigits,'selected cap replaced the global readout');
@@ -45,7 +59,7 @@ const {join}=require('node:path');
   await page.locator('#bd-stop').click();assert.deepEqual(await page.evaluate(()=>calls.find(c=>c[0]==='stop')),['stop','two']);
   // Draft popup, immediate settings and Esc-like cancellation at the original size.
   await page.evaluate(()=>window.beforeRules=JSON.stringify(testSnap));
-  await page.locator('[data-counter="RUN"]').click();assert.equal(await page.locator('#bd-mode').innerText(),'RUN');assert.equal(await page.locator('#bd-reset').isVisible(),false);
+  await page.locator('[data-counter="RUN"]').click();assert.equal(await page.locator('#bd-mode').textContent(),'Open sessions');assert.equal(await page.locator('#bd-reset').isVisible(),false);
   await page.locator('[data-counter="TRIP"]').click();assert.ok(await page.locator('#bd-reset').isVisible());
   assert.equal(await page.locator('#bd-mode-sel').isVisible(),false);
   const openPicker=async()=>{await page.locator('[data-rule="switch"]').click();await page.locator('#fallback-provider-filter option[value="other"]').waitFor({state:'attached'});};
@@ -209,8 +223,29 @@ const {join}=require('node:path');
   await page.evaluate(()=>{testSnap.compact=true;testSnap.preferences.paused=true;render(testSnap);});await page.setViewportSize({width:340,height:46});assert.equal(await page.locator('#bar-rate').innerText(),'PAUSED','breach hid the pause indication');
   await page.evaluate(()=>{testSnap.preferences.paused=false;testSnap.open_sessions[0].name='clear-panda-87654321';testSnap.open_sessions[1].name='clear-panda-12345678';render(testSnap);});
   assert.equal(await page.locator('#bar-model').innerText(),'clear-panda-87654321');await dockFits();
-  await page.evaluate(()=>{Object.assign(testSnap.open_sessions[0],{on_fallback:true,stage:'fallback',stopped:false,state:'fallback',fallback_spent:.01,fallback_limit:.10,fallback_model:'companyhub/gemini-3.8-flash',fallback_free:false});testSnap.active=true;render(testSnap);});
+  await page.evaluate(()=>{Object.assign(testSnap.open_sessions[0],{rule:'switch',on_fallback:true,stage:'fallback',stopped:false,state:'fallback',fallback_spent:.01,fallback_limit:.10,fallback_model:'mock/long-context-coding-model',fallback_free:false});testSnap.active=true;render(testSnap);});
   assert.equal(await page.locator('#bar-model .dock-line').count(),2);assert.ok(await page.locator('#bar-model .dock-line').evaluateAll(es=>es.every(e=>e.getBoundingClientRect().height<=12&&getComputedStyle(e).whiteSpace==='nowrap')));await dockFits();
+  // The completed original allowance is history, and Keep going is uncapped.
+  await page.evaluate(()=>{testSnap.compact=false;testSnap.selected_session='fox';Object.assign(testSnap.open_sessions[0],{then:'stop',enforced:true});Object.assign(testSnap,{view:'RUN',cost:.56,open_cost:.56,rate:1.8});render(testSnap);document.getElementById('toast').classList.add('hidden');});await page.setViewportSize({width:800,height:780});
+  assert.match(await page.locator('#session-limit-note').innerText(),/Clear the limit.*OpenCode.*\/model/);
+  assert.match(await page.locator('.session-row[data-id="fox"] .session-measure').innerText(),/Original \$0.55 \/ \$0.50/);
+  assert.equal(await page.locator('.session-row[data-id="fox"] .session-progress').isVisible(),false);
+  assert.equal(await page.locator('.session-row[data-id="fox"] .session-fallback i').count(),1);
+  assert.equal(await page.locator('#bd-bar-track').isVisible(),true);
+  await page.screenshot({path:join(out,'fallback-capped.png')});
+  await page.evaluate(()=>{Object.assign(testSnap.open_sessions[0],{then:'go',fallback_spent:.15});testSnap.cost=testSnap.open_cost=.70;render(testSnap);document.getElementById('toast').classList.add('hidden');});
+  assert.match(await page.locator('#bd-budget-label').innerText(),/Fallback.*\$0.15.*no cap/);
+  assert.equal(await page.locator('#bd-bar-track').isVisible(),false);
+  assert.equal(await page.locator('.session-row[data-id="fox"] .session-fallback i').count(),0);
+  assert.doesNotMatch(await page.locator('.session-row[data-id="fox"] .session-fallback').innerText(),/\$0.10|%/);
+  await page.screenshot({path:join(out,'fallback-uncapped.png')});
+  await page.evaluate(()=>{testSnap.compact=true;render(testSnap);});await page.setViewportSize({width:340,height:46});assert.equal(await page.locator('#bar-edge').isVisible(),false);await dockFits();
+  await page.evaluate(()=>{testSnap.compact=false;render(testSnap);});await page.setViewportSize({width:800,height:780});
+  await page.evaluate(()=>{Object.assign(testSnap.open_sessions[0],{fallback_model:'mock/free',fallback_free:true});testSnap.cost=testSnap.open_cost=.55;render(testSnap);document.getElementById('toast').classList.add('hidden');});assert.match(await page.locator('#bd-budget-label').innerText(),/free.*no cap/);
+  await page.screenshot({path:join(out,'fallback-free.png')});
+  await page.evaluate(()=>{Object.assign(testSnap.open_sessions[0],{fallback_model:'mock/long-context-coding-model',then:'stop',fallback_free:false,fallback_spent:.01});render(testSnap);});assert.equal(await page.locator('#bd-bar-track').isVisible(),true);
+  await page.locator('.session-row[data-id="owl"]').click();assert.doesNotMatch(await page.locator('#session-limit-note').innerText(),/controls.*model/);assert.equal(await page.locator('#bd-bar-track').isVisible(),true);
+  await page.evaluate(()=>{testSnap.compact=true;render(testSnap);});await page.setViewportSize({width:340,height:46});await dockFits();
   await page.evaluate(()=>{showRuleToast({...testSnap.open_sessions[0],stopped:true,detail:'Fallback companyhub/gemini stopped: authentication failed. No other provider was tried.'});});
   assert.doesNotMatch(await page.locator('#rule-toast-text').innerText(),/Raise the limit/);await page.waitForFunction(()=>calls.some(c=>c[0]==='rule-toast-size'&&c[1]>46));
   await page.evaluate(()=>{dismissRuleToast();showRuleToast(testSnap.open_sessions[0]);dismissRuleToast();});await page.waitForFunction(()=>calls.filter(c=>c[0]==='rule-toast-size').at(-1)?.[1]===0);

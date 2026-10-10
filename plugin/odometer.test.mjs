@@ -58,6 +58,33 @@ test('chat model routing persists choices and preserves nested IDs, budgets and 
   const following={message:{id:'follow-opencode',model:{providerID:'manual',modelID:'choice'}}}
   await restarted['chat.message']({sessionID:'new-chat'},following)
   assert.equal(following.message.model.providerID,'manual','clearing a chat choice must restore OpenCode selection')
+  // Released/stale budget generations cannot override explicit native choices.
+  writeFileSync(durablePath,JSON.stringify({id:'old-budget',key:'custom/google/gemma-4',session_id:'new-chat',persistent:true,source:'budget'}))
+  writeFileSync(join(dir,'budget.json'),JSON.stringify({enabled:true,updated:Date.now()/1000,sessions:{'new-chat':{stage:'original',state:'ok',cost:0,limit:1}}}))
+  for(let i=0;i<2;i++){
+    const output={message:{id:'native-'+i,model:{providerID:'manual',modelID:'choice'}}}
+    await restarted['chat.message']({sessionID:'new-chat'},output)
+    assert.equal(output.message.model.providerID,'manual','released budget still pins the model')
+  }
+  assert.equal(existsSync(durablePath),false)
+  writeFileSync(durablePath,JSON.stringify({id:'restored',key:'custom/google/gemma-4',session_id:'new-chat',persistent:false,source:'budget_restore'}))
+  const native={message:{id:'native-restore',model:{providerID:'manual',modelID:'choice'}}}
+  await restarted['chat.message']({sessionID:'new-chat'},native)
+  assert.equal(native.message.model.providerID,'manual','one-shot restoration overrides native picker')
+  assert.equal(existsSync(durablePath),false)
+  // Deliberate Odometer picks stay pinned even when the native picker differs.
+  writeFileSync(durablePath,JSON.stringify({id:'manual-pin',key:'custom/google/gemma-4',session_id:'new-chat',persistent:true,source:'manual'}))
+  const pinned={message:{id:'pinned-native',model:{providerID:'manual',modelID:'choice'}}}
+  await restarted['chat.message']({sessionID:'new-chat'},pinned)
+  assert.equal(pinned.message.model.providerID,'custom')
+  rmSync(durablePath)
+  // Pausing enforcement is not releasing the configured fallback route.
+  writeFileSync(durablePath,JSON.stringify({id:'paused-budget',key:'custom/google/gemma-4',session_id:'new-chat',persistent:true,source:'budget'}))
+  writeFileSync(join(dir,'budget.json'),JSON.stringify({enabled:false,updated:Date.now()/1000,sessions:{'new-chat':{stage:'fallback',generation:'paused-budget',state:'ok',cost:0,limit:1}}}))
+  const pausedRoute={message:{id:'paused-route',model:{providerID:'manual',modelID:'choice'}}}
+  await restarted['chat.message']({sessionID:'new-chat'},pausedRoute)
+  assert.equal(pausedRoute.message.model.providerID,'custom','pausing enforcement released the fallback route')
+  rmSync(durablePath)
   writeFileSync(durablePath,JSON.stringify({id:'unavailable',key:'custom/removed',session_id:'new-chat',issued:Date.now()/1000}))
   await assert.rejects(restarted['chat.message']({sessionID:'new-chat'},{message:{id:'invalid-selection',model:{providerID:'old',modelID:'expensive'}}}),{name:'MessageAbortedError'})
   assert.equal(status('unavailable').status,'failed','an unavailable choice must not silently use the expensive default')

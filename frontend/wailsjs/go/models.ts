@@ -145,6 +145,7 @@ export namespace app {
 	    issued: number;
 	    message_id?: string;
 	    persistent?: boolean;
+	    source?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new ModelSwitch(source);
@@ -160,6 +161,7 @@ export namespace app {
 	        this.issued = source["issued"];
 	        this.message_id = source["message_id"];
 	        this.persistent = source["persistent"];
+	        this.source = source["source"];
 	    }
 	}
 	export class OpenSessionRow {
@@ -286,6 +288,135 @@ export namespace app {
 	        this.output_rate = source["output_rate"];
 	        this.cache_read_rate = source["cache_read_rate"];
 	        this.cache_write_rate = source["cache_write_rate"];
+	    }
+	}
+	export class StorageSummary {
+	    ledger_bytes: number;
+	    telemetry_bytes: number;
+	    protocol_bytes: number;
+	    export_bytes: number;
+	    other_bytes: number;
+	    retained_messages: number;
+	    archived_days: number;
+	    archived_message_ids: number;
+
+	    static createFrom(source: any = {}) {
+	        return new StorageSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ledger_bytes = source["ledger_bytes"];
+	        this.telemetry_bytes = source["telemetry_bytes"];
+	        this.protocol_bytes = source["protocol_bytes"];
+	        this.export_bytes = source["export_bytes"];
+	        this.other_bytes = source["other_bytes"];
+	        this.retained_messages = source["retained_messages"];
+	        this.archived_days = source["archived_days"];
+	        this.archived_message_ids = source["archived_message_ids"];
+	    }
+	}
+	export class UsageReport {
+	    start: string;
+	    end: string;
+	    calendar: string;
+	    first_date: string;
+	    rows: ledger.UsageBucket[];
+	    cost: number;
+	    saved: number;
+	    estimated_cost: number;
+	    unknown_messages: number;
+	    messages: number;
+	    free_messages: number;
+	    tokens: number;
+	    unallocated_cost: number;
+	    undated_messages: number;
+	    storage: StorageSummary;
+
+	    static createFrom(source: any = {}) {
+	        return new UsageReport(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.start = source["start"];
+	        this.end = source["end"];
+	        this.calendar = source["calendar"];
+	        this.first_date = source["first_date"];
+	        this.rows = this.convertValues(source["rows"], ledger.UsageBucket);
+	        this.cost = source["cost"];
+	        this.saved = source["saved"];
+	        this.estimated_cost = source["estimated_cost"];
+	        this.unknown_messages = source["unknown_messages"];
+	        this.messages = source["messages"];
+	        this.free_messages = source["free_messages"];
+	        this.tokens = source["tokens"];
+	        this.unallocated_cost = source["unallocated_cost"];
+	        this.undated_messages = source["undated_messages"];
+	        this.storage = this.convertValues(source["storage"], StorageSummary);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace ledger {
+
+	export class UsageBucket {
+	    date: string;
+	    provider: string;
+	    model: string;
+	    source: string;
+	    free: boolean;
+	    estimated: boolean;
+	    unknown: boolean;
+	    messages: number;
+	    input: number;
+	    output: number;
+	    reasoning: number;
+	    cache_read: number;
+	    cache_write: number;
+	    cost: number;
+	    saved: number;
+
+	    static createFrom(source: any = {}) {
+	        return new UsageBucket(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.date = source["date"];
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.source = source["source"];
+	        this.free = source["free"];
+	        this.estimated = source["estimated"];
+	        this.unknown = source["unknown"];
+	        this.messages = source["messages"];
+	        this.input = source["input"];
+	        this.output = source["output"];
+	        this.reasoning = source["reasoning"];
+	        this.cache_read = source["cache_read"];
+	        this.cache_write = source["cache_write"];
+	        this.cost = source["cost"];
+	        this.saved = source["saved"];
 	    }
 	}
 

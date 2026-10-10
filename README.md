@@ -40,7 +40,21 @@ The compact limit section configures a separate fallback allowance:
 
 ![Expanded panel with compact per-session budget controls](docs/screenshots/expanded-rules.png)
 
-![Cheaper-model popup with measured score and extra budget](docs/screenshots/fallback-picker.png)
+![Cheaper-model popup with configured prices and extra budget](docs/screenshots/fallback-picker.png)
+
+After switching, the original allowance is labelled separately. A paid fallback
+with **Stop** shows its own cap and progress:
+
+![Paid fallback with a separate stopping cap and routing explanation](docs/screenshots/fallback-capped.png)
+
+With **Keep going**, spending is still counted, but there is no stopping cap or
+budget bar:
+
+![Paid fallback with no stopping cap](docs/screenshots/fallback-uncapped.png)
+
+A free fallback also runs without a spending cap:
+
+![Free fallback without a budget bar](docs/screenshots/fallback-free.png)
 
 See [automatic budget rules, metadata and validation](docs/BUDGET_RULES.md).
 
@@ -91,7 +105,7 @@ they return token usage. Odometer can price that usage locally. See
   OpenCode after a plugin update to activate this control.
 - Click the expand arrow for spending details and a ten-minute spending sparkline.
   Switch the readout between spent and remaining. Hover keeps the window still.
-- A chat's delegated child sessions share its spending cap and grace allowance.
+- A chat's delegated child sessions share its spending cap.
 - Completed live charges briefly show a `+$0.023` tick; replayed history stays quiet.
 - Windows system tray provides show, hide, pause/resume and quit. Quit suppresses
   relaunch in existing OpenCode instances; a fresh OpenCode launch follows Settings.
@@ -105,19 +119,21 @@ they return token usage. Odometer can price that usage locally. See
 - Open the rebuilt executable once, then restart OpenCode to activate the updated
   bundled plugin. Model routing requires a chat observed by that plugin.
 
-- **Live odometer** — mechanical-style counter, labelled RUN, TRIP (resettable) and TOTAL. The compact dock always shows RUN across open TUIs.
+- **Live odometer** — mechanical-style counter: **Open sessions**, **Since reset** and **All time**. The compact dock shows Open sessions across open TUIs; resetting the display counter preserves budgets.
+- **Usage history** — Today, Monday-start week, month or custom dates, with a daily chart, model/provider breakdown and period CSV. Daily archives survive message pruning; missing older date detail is identified.
 - **Cache-aware pricing** — `input`, `output`, `cache_read` and `cache_write`
   priced separately, so cached tokens use the appropriate rate.
 - **Per-open-session budget** — hard limits without grace, with an amber warning at 75%.
-  Counts spending from TUI startup; setting or editing the limit re-evaluates immediately.
+  Starts at zero when enabled; editing an enabled cap preserves its counted spending and re-evaluates immediately.
 - **Blocks before the next provider call** — the plugin rechecks every model/tool
   step, waiting for the preceding usage to be accounted. A request already
   dispatched can still overshoot its allowance.
 - **Automatic cheaper-model fallback** — a configured per-session rule stops the
   original turn at exhaustion, activates a separate fallback allowance and submits
   one continuation in the same conversation. Manual STOP suppresses continuation.
-- **Measured model facts** — models.dev capabilities plus optional Artificial
-  Analysis scores/speed; exact matches only, with unmatched models labelled Not rated.
+- **Optional model benchmarks** — models.dev capabilities plus Artificial
+  Analysis scores/speed for exact matches. A benchmark key is not required for
+  pricing, budgets or automatic switching; model cards keep their concise descriptions.
 - **Auto-updating prices** — ~1,090 models from [models.dev](https://models.dev),
   refreshed in the background. A snapshot is compiled into the binary as an
   offline floor.
@@ -131,7 +147,7 @@ they return token usage. Odometer can price that usage locally. See
 - **Explainable hybrid accounting** — an explicit local/free setting wins,
   then a non-zero OpenCode event cost, then exact catalog pricing, then a
   deterministic cross-provider estimate. Each ledger record keeps its source.
-- **CSV export** of every priced message.
+- **CSV export** matching the selected counter, plus daily usage reports.
 
 ---
 
@@ -139,7 +155,7 @@ they return token usage. Odometer can price that usage locally. See
 
 ### From a release
 
-1. Download `OpenCode_Odometer.exe` from
+1. Download `OpenCode_Odometer-v2.2.0.exe` from
    [Releases](https://github.com/vivek9102/opencode-odometer/releases).
 2. Run it. On first launch it writes its price table and installs the plugin
    into `~/.config/opencode/plugins/`. It also remembers that exact executable,
@@ -147,7 +163,11 @@ they return token usage. Odometer can price that usage locally. See
    later, run it once from the new location to update the pointer.
 3. **Restart OpenCode** so it loads the plugin.
 
-Windows SmartScreen will warn on an unsigned binary — *More info → Run anyway*.
+The executable is unsigned. If Windows blocks it, right-click the downloaded
+file → **Properties → Unblock → Apply**, then run it again. If SmartScreen
+offers **More info → Run anyway**, that is another option. Do not disable
+Windows security. On a managed computer where these options are unavailable,
+ask your administrator to approve the executable.
 
 Requires the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/),
 present by default on Windows 11 and current Windows 10.
@@ -262,8 +282,9 @@ paid requests at 100%, without a grace turn. An in-flight request can overshoot.
 The dock aggregates open-session RUN spending, while the footer edits only the
 selected session. TRIP/TOTAL and the model usage table remain global.
 
-Open-session spending is counted from TUI startup, including before a limit is
-enabled. Editing a cap, resetting TRIP or restarting Odometer preserves it. Closing a TUI removes
+Aggregate open-session spending is counted from TUI startup. Each budget allowance
+starts at zero when enabled. Editing an enabled cap, resetting the display counter
+or restarting Odometer preserves its counted spending. Closing a TUI removes
 its rule/cap but preserves history. Two TUIs sharing one conversation cannot have
 independent execution; automatic fallback is refused for that shared conversation.
 
@@ -271,7 +292,11 @@ Choose **Stop at limit** or configure **Switch to a cheaper model…** with an e
 Switching happens at exhaustion, through stop → prepare → activate fallback → one
 automatic continuation. A paid fallback has its own allowance and **Stop / Keep
 going** choice; a confirmed free route has no paid cap. Raising or clearing the
-original limit restores its model when counted spending is below the new cap.
+original limit restores its allowance when counted spending is below the new cap.
+Clearing it releases budget-owned model routing and follows OpenCode's picker.
+A raised cap can restore the original model for one request; an explicit native
+model choice takes precedence. Deliberate choices saved in Odometer's model
+picker remain active until cleared there.
 STOP SESSION cancels current activity like Esc, suppresses automatic continuation
 of that task, and leaves the allowance unchanged. A later user message follows
 the normal budget policy.
@@ -299,6 +324,40 @@ OpenCode's displayed selection may differ from the model used for requests.
 Specialised models remain listed but cannot be selected for a coding chat.
 An unavailable saved model produces an error instead of silently falling
 back to the default.
+
+Budget fallback routing is separate from a deliberate saved model choice.
+Clearing or releasing its allowance removes the budget-owned override, so it
+cannot leave OpenCode's picker stuck on the original model.
+
+## Usage reports and storage
+
+![Usage history with calendar range, daily consumption and model breakdown](docs/screenshots/usage-history.png)
+
+Open **USAGE** for local calendar consumption across all sessions. Choose Today,
+This week (Monday onward), This month or custom dates, then **SHOW**. **EXPORT
+PERIOD CSV** saves daily model/provider totals and pricing provenance under the
+local app data directory's `exports` folder. Unknown pricing is counted and
+flagged; estimated dollars are identified. Savings are counterfactual estimates,
+not money charged by a provider. Dates use the local day recorded on ingestion.
+
+The main **EXPORT CSV** follows the selected counter. Open sessions exports only
+open-TUI roots and children, once per message. Since reset exports message
+deltas, including streams that started before reset. All time includes labelled
+archived summaries. Each footer equals the sum of its data rows. Older saved
+states contain only a scalar reset baseline: until the next counter reset,
+their period CSV explicitly uses a summary instead of inventing detailed rows.
+
+Before pruning old message details, Odometer preserves day/model accounting and
+the message ID needed to reject duplicate history replay. Archived accounting
+is immutable; full message details are not retained. The compact ID index and
+daily summaries grow with use, and the Usage panel shows actual storage size.
+Amounts already pruned by older versions cannot be assigned dates retroactively.
+
+Hourly cleanup considers only terminal acknowledgements and closed presence or
+inventory files older than seven days. Active owners, referenced commands and
+choices are protected. Ledgers, budgets, exports, unfinished commands, malformed
+files and unread event spools are kept. Existing log/spool size limits stay in
+place; this cleanup does not touch OpenCode's conversation database.
 
 After installing an updated bundled plugin, run Odometer once and restart
 OpenCode. Send a message in the target chat so the plugin can observe it.

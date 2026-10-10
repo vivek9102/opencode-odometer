@@ -48,7 +48,9 @@ test('automatic fallback stops, prepares and continues once; manual stop, uncert
  fs.renameSync=(from,to)=>{if(String(to).includes('continue-status-success.json')&&transientWrites-->0){const error=Error('test sharing violation');error.code='EPERM';throw error}return rename(from,to)};syncBuiltinESMExports()
  try{
   let r=request('success');const done=await finish('success',r.doc);assert.equal(done.status,'confirmed');assert.equal(prompts.length,1);assert.deepEqual(aborts,['root','child'])
-  assert.equal(prompts[0].path.id,'root');assert.deepEqual(prompts[0].body.model,{providerID:'mock',modelID:'cheap'});assert.match(prompts[0].body.parts[0].text,/Preserve completed work/)
+  assert.equal(prompts[0].path.id,'root');assert.deepEqual(prompts[0].body.model,{providerID:'mock',modelID:'cheap'});assert.match(prompts[0].body.parts[0].text,/preserve completed work/i)
+  assert.match(prompts[0].body.parts[0].text,/does not change the requested scope, depth, deliverables, or completion criteria/)
+  assert.match(prompts[0].body.parts[0].text,/do not conclude early or replace unfinished work with a high-level summary/)
   assert.match(prompts[0].body.messageID,/^msg_[a-f0-9]{12}[a-zA-Z0-9]{14}$/)
   writeFileSync(r.path,JSON.stringify(r.req));await wait(1100);assert.equal(prompts.length,1,'duplicate automatic prompt');assert.equal(existsSync(r.path),false)
   r=request('manual');assert.equal((await finish('manual',r.doc,true)).status,'failed');assert.equal(prompts.length,1,'manual stop ignored')

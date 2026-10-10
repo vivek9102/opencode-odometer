@@ -25,6 +25,9 @@ export default {id:"opencode-odometer-presence",tui:async(api)=>{
     const status=sid?api.state.session.status(sid):null
     let choice
     try{choice=JSON.parse(readFileSync(join(presence.directory(),`switch-session-${root}.json`),"utf8"))}catch{}
+    if(choice?.source==="budget") {
+      try{const doc=JSON.parse(readFileSync(join(presence.directory(),"budget.json"),"utf8")),b=doc.sessions?.[root];if(b?.stage!=="fallback"||b.generation!==choice.id)choice=null}catch{choice=null}
+    }
     const [providerID,...modelID]=String(choice?.key||"").split("/")
     const label=api.state.provider.find(p=>p.id===providerID)?.models?.[modelID.join("/")]?.name||modelID.join("/")
     setRouting(choice?.session_id===root&&choice?.persistent?` · Routing: ${label} [${providerID}]`:"")

@@ -768,7 +768,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
         if(Date.now()>end)throw Error("Fallback allowance was not activated; the session remains paused.")
         await delay(50)
       }
-      const choice={id:req.id,session_id:req.session_id,key:req.key,persistent:true,issued:req.issued}
+      const choice={id:req.id,session_id:req.session_id,key:req.key,persistent:true,source:"budget",issued:req.issued}
       await continuationBridge(`switch-session-${req.session_id}.json`,choice)
       const last=rootMessages.findLast(m=>m.info?.role==="assistant")?.info
       const lastUser=rootMessages.findLast(m=>m.info?.role==="user")?.info
@@ -805,7 +805,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       const clock=((BigInt(Date.now())*4096n+1n)&((1n<<48n)-1n)).toString(16).padStart(12,"0")
       const messageID=`msg_${clock}${req.id.replaceAll("-","").slice(0,14).padEnd(14,"0")}`
       if(!client.session.promptAsync)throw Error("This OpenCode version does not support asynchronous continuation.")
-      const promptBody={messageID,agent:lastUser?.agent||"build",model:{providerID,modelID:modelParts.join("/")},parts:[{type:"text",text:"[Odometer automatic budget continuation] The original model allowance was exhausted and the configured fallback allowance is active. Continue the outstanding user task using this conversation. Review completed and interrupted tool actions first. Preserve completed work and verify uncertain results before repeating actions. Respect existing permissions. Do not restart the task from scratch."}]}
+      const promptBody={messageID,agent:lastUser?.agent||"build",model:{providerID,modelID:modelParts.join("/")},parts:[{type:"text",text:"[Odometer automatic budget continuation] The configured fallback allowance is active. Resume the outstanding user task from the interruption point in this conversation. Changing models does not change the requested scope, depth, deliverables, or completion criteria. Complete the remaining requested work; do not conclude early or replace unfinished work with a high-level summary because of this budget transition. Review completed and interrupted tool actions first, preserve completed work, and verify uncertain results before repeating actions. Respect existing permissions and constraints. Do not restart the task from scratch."}]}
       const response=await nativeContinuationCall(req,"prompt",promptBody)||await sdkCall(signal=>client.session.promptAsync({path:{id:req.session_id},body:promptBody,signal}),10_000)
       if(response?.error)throw Error("Fallback submission failed. The session remains paused; no automatic retry was sent.")
       const confirmEnd=Date.now()+300_000
@@ -876,12 +876,22 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
   }
   // Durable selections belong to a chat, never to a process or its bounded
   // ownership history. Claim only inside that chat's actual prompt hook.
-  function takeChatSelection(sid, peek = false) {
+  function takeChatSelection(sid, peek = false, incomingKey = "") {
     if (!sid || !/^[a-zA-Z0-9_-]+$/.test(sid)) return
     const target=join(bridgeDir(),`switch-session-${sid}.json`)
     const claim=target+`.${process.pid}.claim`
     let req
     try { req=JSON.parse(readFileSync(target,"utf8")) } catch { return }
+    const doc=readBudget(),budget=sessionBudget(doc||{},sid)
+    // A late continuation must never repin a released allowance. Explicit
+    // native picker choices also take precedence over a one-shot restoration.
+    if ((req?.source==="budget" && doc && (budget?.stage!=="fallback" || budget.generation!==req.id)) ||
+        (req?.source==="budget_restore" && incomingKey && incomingKey!==req.key)) {
+      try { rmSync(target,{force:true}) } catch {}
+      pending.delete(sid)
+      writeSwitchStatus(req,"cancelled","Budget routing released; following OpenCode selection.")
+      return
+    }
     // Chat choices are read on every turn. Older one-request files retain
     // their original semantics until the user makes a new persistent choice.
     if (!req.persistent && !peek) {
@@ -1182,7 +1192,8 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       if (existsSync(join(bridgeDir(),`switch-session-${input.sessionID}.json`)) && !inventory.length) await refreshInventory()
       // Inspect without consuming a one-shot choice: paid choices must remain
       // queued when the cap refuses the turn.
-      const preview=takeChatSelection(input.sessionID,true) || pendingSelection(input.sessionID)
+      const incomingKey=modelKey(output?.message?.model || input.model)
+      const preview=takeChatSelection(input.sessionID,true,incomingKey) || pendingSelection(input.sessionID)
       const previewKey=(output?.message && preview?.key) || modelKey(output?.message?.model || input.model)
       if (await enforceChat(input,previewKey,true)) {
         deferBudgetBlock(input,output,previewKey)
@@ -1190,7 +1201,7 @@ export const OdometerPlugin = async ({ client, serverUrl }) => {
       }
       // Budget checks happen before claiming: a blocked turn keeps its choice.
       if (!output?.message) return
-      const durable = takeChatSelection(input.sessionID)
+      const durable = takeChatSelection(input.sessionID,false,incomingKey)
       const req = durable || pendingSelection(input.sessionID)
       const key=req?.key || modelKey(output.message.model || input.model)
       // A choice can change while the async budget check is running. Recheck

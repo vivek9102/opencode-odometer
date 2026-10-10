@@ -82,6 +82,8 @@ type Client interface {
 // App ties together pricing, the ledger, the budget and the plugin contract.
 type App struct {
 	metadataMu sync.Mutex
+	cleanupMu  sync.Mutex
+	cleanupAt  time.Time
 	metadata   *modelmeta.Catalog
 	Prices     *prices.Book
 	Budget     *budget.Budget
@@ -182,6 +184,9 @@ func New(cfg Config) (*App, error) {
 	}
 	if a.state.OpenSessionsMode {
 		a.RefreshOpenSessions()
+		if !a.loadFailed {
+			a.releaseInactiveBudgetModels()
+		}
 	}
 	// Repair records that an older classifier charged even though their model
 	// key is now recognized as free. Do not broadly reprice paid history here.
@@ -391,6 +396,11 @@ func (a *App) applyLedger(st *ledger.Store) {
 	a.Ledger.TripSavedBase = st.TripSavedBase
 	a.Ledger.PrunedCost = st.PrunedCost
 	a.Ledger.PrunedSaved = st.PrunedSaved
+	a.Ledger.Archived = st.Archived
+	a.Ledger.PrunedIDs = st.PrunedIDs
+	a.Ledger.TripStarted = st.TripStarted
+	a.Ledger.TripBaseline = st.TripBaseline
+	a.Ledger.TripArchived = st.TripArchived
 }
 
 // SaveState persists the ledger and budget bookkeeping atomically.

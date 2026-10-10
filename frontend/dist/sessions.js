@@ -1,6 +1,7 @@
 // Open-TUI selection and aggregate dock. Historical model usage stays global.
 const budgetEdits=new Map(),budgetWrites=new Map();
 let selectionTarget="",selectionRevision=0,selectionQueue=Promise.resolve(),budgetRevision=0,footerSession="";
+const uncappedFallback=row=>!!row?.on_fallback&&(row.fallback_free||row.then==="go");
 function selectedSnapshot(snap) {
   if(!Array.isArray(snap.open_sessions))return snap;
   if(selectionTarget&&snap.open_sessions.some(r=>r.id===selectionTarget))snap={...snap,selected_session:selectionTarget};
@@ -8,7 +9,7 @@ function selectedSnapshot(snap) {
   const fb=!!row?.on_fallback,limit=fb?row.fallback_limit:row?.limit||0,cost=fb?row.fallback_spent||0:row?.cost||0;
   return {...snap,session_id:row?.session_id||"",session_cost:cost,limit,
     mode:row?.mode||"hard",budget_enabled:!!row?.enabled,budget_state:row?.state||"ok",
-    fraction:fb?row.fallback_free?0:limit?cost/limit:0:row?.fraction||0,enforced:!!row?.enforced,grace_remaining:row?.grace_remaining||0,
+    fraction:fb?uncappedFallback(row)?0:limit?cost/limit:0:row?.fraction||0,enforced:!!row?.enforced,grace_remaining:row?.grace_remaining||0,
     past_hard_stop:!!row?.past_hard_stop,hard_stop_at:1,warn_at:.75};
 }
 function renderOpenBudgetControls(snap){
@@ -48,10 +49,11 @@ function renderOpenSessions(snap){
     }
     const [info,budget,tag]=button.children,[title,model]=info.children,[spent,bar]=budget.children,fill=bar.firstElementChild;
     title.textContent=row.name;title.title=row.name;model.textContent=row.on_fallback?`↓ ${row.fallback_model}`:row.model||"idle · no model used yet";model.title=model.textContent;
-    spent.textContent=row.enabled?`$${row.cost.toFixed(2)} / $${row.limit.toFixed(2)}`:`$${row.spent.toFixed(2)} · no limit`;
-    fill.style.width=`${Math.min(100,(row.fraction||0)*100)}%`;fill.style.background=sessionColour(row);bar.classList.toggle("hidden",!row.enabled);budget.style.color=row.enabled?sessionColour(row):"var(--dim)";
+    spent.textContent=row.enabled?`${row.on_fallback?"Original ":""}$${row.cost.toFixed(2)} / $${row.limit.toFixed(2)}`:`$${row.spent.toFixed(2)} · no limit`;
+    spent.title=row.on_fallback?"Completed original-model allowance; the fallback is shown below":"";
+    fill.style.width=`${Math.min(100,(row.fraction||0)*100)}%`;fill.style.background=sessionColour(row);bar.classList.toggle("hidden",!row.enabled||row.on_fallback);budget.style.color=row.enabled?sessionColour(row):"var(--dim)";
     tag.textContent=selected?"▸ SELECTED":row.stopped?"STOPPED":row.stage==="switching"?"SWITCHING":row.on_fallback?`↓ ${bareModel(row.fallback_model)}`:row.state==="over"?"STOPPED":row.state==="warn"?"NEAR LIMIT":!row.session_id?"IDLE":row.enabled?"OK":"NO LIMIT";
-    let extra=budget.querySelector(".session-fallback");if(row.on_fallback){if(!extra){extra=document.createElement("span");extra.className="session-fallback";budget.append(extra);}extra.textContent=row.fallback_free?"fallback is free":`fallback $${row.fallback_spent.toFixed(2)} / $${row.fallback_limit.toFixed(2)}`;extra.title=row.detail||extra.textContent;let mini=extra.querySelector("i");if(!row.fallback_free){mini=document.createElement("i");mini.style.width=`${Math.min(100,row.fallback_limit?row.fallback_spent/row.fallback_limit*100:0)}%`;extra.append(mini);}}else extra?.remove();
+    let extra=budget.querySelector(".session-fallback");if(row.on_fallback){if(!extra){extra=document.createElement("span");extra.className="session-fallback";budget.append(extra);}extra.textContent=row.fallback_free?"Fallback · free · no cap":uncappedFallback(row)?`Fallback $${row.fallback_spent.toFixed(2)} · no cap`:`Fallback $${row.fallback_spent.toFixed(2)} / $${row.fallback_limit.toFixed(2)}`;extra.title=row.detail||extra.textContent;if(!uncappedFallback(row)){const mini=document.createElement("i");mini.style.width=`${Math.min(100,row.fallback_limit?row.fallback_spent/row.fallback_limit*100:0)}%`;extra.append(mini);}}else extra?.remove();
     if(list.children[index]!==button)list.insertBefore(button,list.children[index]||null);
   }
   for(const button of existing.values())button.remove();
@@ -60,15 +62,16 @@ function renderOpenSessions(snap){
   $("selected-name").textContent=selected?.name||"no open session";$("selected-name").title=selected?.name||"";
   $("selected-stage").textContent=selected?.on_fallback?`· fallback: ${bareModel(selected.fallback_model)}`:"";
   $("bd-limit-kind").textContent=selected?.on_fallback?"ORIGINAL $":"$";
-  $("bd-limit").title=selected?.on_fallback?`Original-model limit: $${selected.limit.toFixed(2)}. The bar shows the separate fallback budget; Change edits that cap.`:"Original-model limit for this session";
+  $("bd-limit").title=selected?.on_fallback?`Original-model limit: $${selected.limit.toFixed(2)}. ${uncappedFallback(selected)?"The fallback has no stopping cap.":"The bar shows the separate fallback budget; Change edits that cap."}`:"Original-model limit for this session";
+  $("bd-bar-track").parentElement.classList.toggle("hidden",uncappedFallback(selected));
   if(selected?.on_fallback)$("bd-budget-label").textContent=`Fallback · ${$("bd-budget-label").textContent}`;
-  if(selected?.on_fallback&&selected.fallback_free){$("bd-budget-label").textContent="Fallback · free · no cap";$("bd-bar-fill").style.width="0%";}
+  if(uncappedFallback(selected)){$("bd-budget-label").textContent=selected.fallback_free?"Fallback · free · no cap":`Fallback · $${selected.fallback_spent.toFixed(2)} · no cap`;$("bd-bar-fill").style.width="0%";$("bd-budget-label").title="Fallback spending is counted, but it has no stopping cap.";}
   for(const id of ["bd-limit","bd-enabled","bd-mode-sel"])$(id).disabled=!selected;
   $("bd-limit").placeholder="No limit";
   $("bd-stop").disabled=stoppingSession||!selected?.session_id;
   $("bd-stop").textContent="STOP SESSION";
   const draft=budgetEdits.get(selected?.id);
-  $("session-limit-note").textContent=draft?.needsAmount?"Enter an amount greater than zero to enable this limit.":draft?.pending?"Saving this session’s limit…":"Selected session only · every limit is hard · no grace turn · changing the cap keeps counted spending.";
+  $("session-limit-note").textContent=draft?.needsAmount?"Enter an amount greater than zero to enable this limit.":draft?.pending?"Saving this session’s limit…":selected?.enabled&&(selected.on_fallback||selected.stage==="switching")?"Odometer controls the fallback model. Clear the limit to use OpenCode’s /model selection.":"Selected session only · every limit is hard · no grace turn · changing the cap keeps counted spending.";
   for(const id of budgetEdits.keys())if(!rows.some(r=>r.id===id))budgetEdits.delete(id);
 }
 async function selectOpenSession(id){
@@ -121,7 +124,7 @@ function renderSessionDock(snap){
     model.textContent=worst.stage==="switching"?"Switching…":`→ ${bareModel(worst.fallback_model)}`;
     caption.append(name,model);
   }else caption.textContent=!n?"No open sessions":over?dockName(worst.name):near?`⚠ ${dockName(worst.name)} ${Math.round(worst.fraction*100)}%`:`${count} · ${summary}`;
-  const fallbackDetail=fb?`\nFallback: ${worst.fallback_model} · ${worst.fallback_free?"free":`$${(worst.fallback_spent||0).toFixed(2)} / $${(worst.fallback_limit||0).toFixed(2)}`}`:"";
+  const fallbackDetail=fb?`\nFallback: ${worst.fallback_model} · ${worst.fallback_free?"free · no cap":uncappedFallback(worst)?`$${(worst.fallback_spent||0).toFixed(2)} · no cap`:`$${(worst.fallback_spent||0).toFixed(2)} / $${(worst.fallback_limit||0).toFixed(2)}`}`:"";
   $("bar-model").title=`${count} open · ${summary}\n${snap.preferences?.paused?"Enforcement paused · ":""}${state}${fallbackDetail}\n${rows.map(r=>r.name).join("\n")}`;
   $("bar-model").style.color=worst?sessionColour(worst):"var(--dim)";
   const rate=n?(Number.isFinite(snap.open_rate)?snap.open_rate:snap.rate||0):0;
@@ -129,8 +132,9 @@ function renderSessionDock(snap){
   $("bar-rate").title=over?`${worst.name} stopped. Raise or clear the limit to continue.`:`Burn rate across open sessions: $${rate.toFixed(2)}/hr`;
   $("bar-rate").style.color=over&&!snap.preferences?.paused?"var(--red)":rate>5?"var(--red)":rate>0?"#e4e4e7":"var(--dim)";
   $("bar").classList.toggle("session-over",!!over);
-  $("bar-edge").classList.toggle("hidden",!worst);
-  $("bar-edge").firstElementChild.style.width=`${over?100:Math.min(100,(worst?.fraction||0)*100)}%`;
+  $("bar-edge").classList.toggle("hidden",!worst||uncappedFallback(worst));
+  const edgeFraction=fb?(worst.fallback_limit?worst.fallback_spent/worst.fallback_limit:0):(worst?.fraction||0);
+  $("bar-edge").firstElementChild.style.width=`${over?100:Math.min(100,edgeFraction*100)}%`;
   $("bar-edge").firstElementChild.style.background=sessionColour(worst);
   document.body.classList.toggle("quiet-idle",!!snap.preferences?.idle_dim&&!active&&!(worst?.fraction>=.75)&&!snap.unpriced_models&&!snap.preferences?.paused);
 }

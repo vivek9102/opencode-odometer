@@ -265,6 +265,7 @@ func (a *App) SyncRecent() (int, error) {
 // Poll is a fallback that a UI can call on a timer (e.g. 1s tick) to detect
 // newly updated sessions/turns, absorb grace claims, and re-publish state.
 func (a *App) Poll() {
+	a.maybeCleanupProtocol()
 	// The plugin ignores a budget older than two minutes. Keep its heartbeat
 	// fresh on every poll, including idle sessions and connected streams with
 	// no new messages, without moving any spending baselines.

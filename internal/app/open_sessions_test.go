@@ -5,12 +5,15 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/vivek9102/opencode-odometer/internal/ledger"
 	"github.com/vivek9102/opencode-odometer/internal/plugin"
 )
+
+var testProcessHeartbeat = time.Now().Unix()
 
 func reportTUI(t *testing.T, a *App, id, sid string, closed bool) OpenTUI {
 	t.Helper()
@@ -224,7 +227,10 @@ func TestOpenSessionRestartHomeBindingAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := reportTUI(t, restarted, "home", "different-chat", false)
-	e.Updated = time.Now().Add(-11 * time.Second).Unix()
+	// The fixture process may itself be younger than eleven seconds. A real
+	// heartbeat cannot precede its process; the OS identity boundary is tested
+	// separately in opencode.TestPresenceProcessIdentity.
+	e.Updated = max(time.Now().Add(-11*time.Second).Unix(), testProcessHeartbeat)
 	raw, _ := json.Marshal(e)
 	os.WriteFile(filepath.Join(a.experienceDir(), "tui-home.json"), raw, 0600)
 	if rows := restarted.OpenSessions(); len(rows) != 1 || !rows[0].Enabled {
@@ -331,5 +337,30 @@ func TestOpenSessionValidationAndDeadProcess(t *testing.T) {
 	os.WriteFile(filepath.Join(a.experienceDir(), "tui-dead.json"), raw, 0600)
 	if rows := a.OpenSessions(); len(rows) != 1 || rows[0].ID != "one" {
 		t.Fatalf("dead process retained: %+v", rows)
+	}
+}
+
+func TestOpenSessionRejectsReusedWindowsPIDWithoutLosingCurrentBudget(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows process creation time check")
+	}
+	a, _, _ := newTestApp(t)
+	reportTUI(t, a, "current", "chat-current", false)
+	if err := a.SetOpenSessionBudget("current", .2, "hard", true); err != nil {
+		t.Fatal(err)
+	}
+	stale := reportTUI(t, a, "yesterday", "", false)
+	stale.Started = time.Now().Add(-24 * time.Hour).UnixMilli()
+	stale.Updated = time.Now().Add(-24 * time.Hour).Unix()
+	raw, _ := json.Marshal(stale)
+	if err := os.WriteFile(filepath.Join(a.experienceDir(), "tui-yesterday.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A stale file can reappear on every poll; filtering it must be stable.
+	for i := 0; i < 3; i++ {
+		rows := a.OpenSessions()
+		if len(rows) != 1 || rows[0].ID != "current" || !rows[0].Enabled || rows[0].Limit != .2 {
+			t.Fatalf("reused PID created an extra row or lost the live cap: %+v", rows)
+		}
 	}
 }

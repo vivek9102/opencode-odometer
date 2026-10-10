@@ -154,8 +154,15 @@ func (a *App) ResumeOpenSession(id string, amount float64) error {
 	p.Event = uuid.NewString()
 	a.state.OpenPolicies[id] = p
 	a.mu.Unlock()
+	a.PublishBudget()
 	if restoreModel && p.OriginalModel != "" && e.SessionID != "" && !p.Stopped {
-		_, err := a.RequestModelSwitch(e.SessionID, p.OriginalModel)
+		released, err := a.releaseBudgetModel(e.SessionID, p)
+		if err != nil {
+			return err
+		}
+		if released {
+			_, err = a.requestModelSwitch(e.SessionID, p.OriginalModel, "budget_restore")
+		}
 		if err != nil {
 			a.setRuleFailure(id, "Budget increased, but restoring the original model failed: "+err.Error())
 			return err

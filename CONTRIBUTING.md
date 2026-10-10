@@ -31,6 +31,7 @@ node --check frontend/dist/main.js
 node --check frontend/dist/experience.js
 node --check frontend/dist/sessions.js
 node --check frontend/dist/budget-rules.js
+node --check frontend/dist/usage.js
 node --test plugin/*.test.mjs
 git diff --check
 ```
@@ -77,6 +78,12 @@ OpenCode or Odometer data.
   cleared. Confirm it using the matching assistant response. OpenCode `/model`
   does not automatically clear an Odometer choice; preserve the explicit
   **Use OpenCode selection** handoff.
+- Budget-owned routes are generation-scoped and released with their allowance.
+  Restoring a cap must not create a persistent original-model pin. Preserve
+  deliberately saved manual choices and test native selection after release.
+- Archive daily accounting before pruning message rows. CSV data and totals
+  must share a scope; reset exports use deltas, not all retained messages.
+  Never assign undated historical totals to invented calendar dates.
 
 ## Keep private data out of commits
 
