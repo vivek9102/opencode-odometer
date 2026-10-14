@@ -14,6 +14,18 @@ WebView2 Runtime, normally available on Windows 11 and current Windows 10.
 
 ## Install or upgrade
 
+Choose the executable for your **OpenCode major version**. The Odometer version
+number is separate from the OpenCode version.
+
+| Installed OpenCode | Odometer release | Source |
+|---|---|---|
+| OpenCode V1 | [V1 edition, v2.2.0](https://github.com/vivek9102/opencode-odometer/releases/tag/v2.2.0) | `main` |
+| OpenCode V2 | [V2 edition, v2.3.1 preview](https://github.com/vivek9102/opencode-odometer/releases/tag/opencode-v2-v2.3.1) | `codex/opencode-v2` |
+
+For V2, follow the [V2 edition guide](https://github.com/vivek9102/opencode-odometer/blob/codex/opencode-v2/docs/OPENCODE_V2.md).
+It is tested with OpenCode 2.0.28 and uses a separate plugin package and executable.
+The instructions below describe V1. Do not run both editions simultaneously.
+
 1. Download the Windows executable from [Releases](https://github.com/vivek9102/opencode-odometer/releases).
 2. Quit the previous Odometer instance, then run the downloaded executable once.
    This installs the bundled plugins and records the executable's location.
