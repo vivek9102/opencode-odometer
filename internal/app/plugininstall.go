@@ -96,6 +96,7 @@ func (a *App) ensureV2Package(dir string) PluginStatus {
 		"tui.tsx":         tuiSource,
 		"tui-presence.js": presenceSource,
 		"v2-models.js":    v2ModelSource,
+		"v2-sessions.js":  v2SessionSource,
 		"package.json":    []byte(`{"name":"opencode-odometer-v2","private":true,"type":"module","exports":{".":"./index.js","./tui":"./tui.tsx"}}`),
 	}
 	for name, body := range files {

@@ -36,6 +36,10 @@ func TestEmbeddedPluginMatchesSource(t *testing.T) {
 		}
 	}
 	if IntegrationV2 {
+		rawSessions, errSessions := os.ReadFile(filepath.Join(root, "plugin", "v2-sessions.js"))
+		if errSessions != nil || string(rawSessions) != string(v2SessionSource) {
+			t.Fatal("embedded V2 session helper is stale")
+		}
 		raw, err := os.ReadFile(filepath.Join(root, "plugin", "v2-models.js"))
 		if err != nil || string(raw) != string(v2ModelSource) {
 			t.Fatal("embedded V2 model normalizer is stale")

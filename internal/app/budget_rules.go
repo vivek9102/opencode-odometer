@@ -16,6 +16,9 @@ import (
 // global total. Delayed updates and widget restarts retain their attribution.
 func (a *App) policySpendLocked(e OpenTUI, p OpenPolicy, records []ledger.Record) (float64, float64) {
 	original, fallback := 0.0, 0.0
+	if e.APIMajor == 2 {
+		original, fallback = p.ArchivedOriginal, p.ArchivedFallback
+	}
 	start := time.UnixMilli(e.Started).Format("2006-01-02 15:04:05")
 	for _, r := range records {
 		if e.SessionID == "" || budgetRoot(r.SessionID, a.state.SessionParents) != e.SessionID || r.Timestamp < start {

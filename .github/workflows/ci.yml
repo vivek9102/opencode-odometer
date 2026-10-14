@@ -51,6 +51,7 @@ jobs:
         run: |
           node --check plugin/odometer-v2.js
           node --check plugin/v2-models.js
+          node --check plugin/v2-sessions.js
           node --check plugin/tui-presence.js
           node --check tools/opencode-v2-smoke.cjs
       # frontend/dist/main.js is hand-edited (no build/bundle step), so a

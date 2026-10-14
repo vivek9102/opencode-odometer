@@ -22,6 +22,9 @@ var tuiSource []byte
 //go:embed v2_models.js
 var v2ModelSource []byte
 
+//go:embed v2_sessions.js
+var v2SessionSource []byte
+
 // Never replace a V1 installation with V2 files based on an unknown version.
 func CheckOpenCodeCompatibility() error {
 	out, err := probeOpenCodeVersion()

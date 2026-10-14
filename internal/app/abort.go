@@ -50,6 +50,10 @@ func (a *App) RequestOpenSessionAbort(id string) error {
 }
 
 func (a *App) stopOpenTUI(row OpenSessionRow) error {
+	terminalID := row.ID
+	if row.APIMajor == 2 && row.TerminalID != "" {
+		terminalID = row.TerminalID
+	}
 	requestID := uuid.NewString()
 	children := []string{}
 	a.mu.RLock()
@@ -62,12 +66,12 @@ func (a *App) stopOpenTUI(row OpenSessionRow) error {
 	req := struct {
 		abortRequest
 		Children []string `json:"children"`
-	}{abortRequest: abortRequest{ID: requestID, SessionID: row.SessionID, Instance: row.ID, Issued: time.Now().Unix()}, Children: children}
+	}{abortRequest: abortRequest{ID: requestID, SessionID: row.SessionID, Instance: terminalID, Issued: time.Now().Unix()}, Children: children}
 	raw, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
-	target := filepath.Join(a.experienceDir(), "stop-tui-"+row.ID+".json")
+	target := filepath.Join(a.experienceDir(), "stop-tui-"+terminalID+".json")
 	statusFile := filepath.Join(a.experienceDir(), "abort-status-"+requestID+".json")
 	if err = atomicExperienceFile(target, raw); err != nil {
 		return err

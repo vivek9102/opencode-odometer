@@ -10,10 +10,16 @@ require verification. The installer refuses an unknown CLI version or V1.
 
 ## Install the preview
 
+Download the **OpenCodeV2** executable and its checksum from the
+[V2 preview release](https://github.com/vivek9102/opencode-odometer/releases/tag/opencode-v2-v2.3.1).
+For OpenCode V1, use the separate
+[V1 release](https://github.com/vivek9102/opencode-odometer/releases/tag/v2.2.0).
+Odometer v2.3.1 is the application version, not an OpenCode CLI version.
+
 1. Confirm OpenCode V2 is installed and close the V1 Odometer instance.
 2. Run the executable labelled **OpenCodeV2** once.
 3. Restart OpenCode to load its server and terminal integration.
-4. Configure the desired session budget. New terminal instances start without limits.
+4. Configure the desired conversation budget. New conversations start without limits.
 
 Accounting history and private prices are retained in the normal Odometer data
 directory. Do not run both editions against it simultaneously.
@@ -35,6 +41,7 @@ installer creates this package in the user's OpenCode configuration directory:
   tui.tsx
   tui-presence.js
   v2-models.js
+  v2-sessions.js
 ```
 
 | Installed file | Repository source | Responsibility |
@@ -43,6 +50,7 @@ installer creates this package in the user's OpenCode configuration directory:
 | `tui.tsx` | [odometer-v2-tui.tsx](../plugin/odometer-v2-tui.tsx) | Terminal identity, current conversation, routing label, early model inventory and cancellation. |
 | `tui-presence.js` | [tui-presence.js](../plugin/tui-presence.js) | Heartbeats, closure and V2 widget startup. Shared helper, not a separate plugin. |
 | `v2-models.js` | [v2-models.js](../plugin/v2-models.js) | Public model capabilities/prices in the existing picker format. Shared helper, not a separate plugin. |
+| `v2-sessions.js` | [v2-sessions.js](../plugin/v2-sessions.js) | Open-tab inventory and stable conversation names. Shared helper, not a separate plugin. |
 | `package.json` | [installer](../internal/app/plugininstall.go) | Server and `./tui` exports. No npm installation is needed. |
 
 The directory is registered under `plugins` in global `cli.json`. Server-side
@@ -85,8 +93,18 @@ Transport uses OpenCode's authenticated plugin/terminal clients. The V2 widget
 does not run the V1 HTTP/SSE reader against V2 routes or store server passwords in
 its pointer. Remote-server control is not a tested capability of this local-file
 edition. The terminal uses additive slots, leaving the native prompt, focus,
-submission and Esc handling intact. A row represents one terminal instance and
-its current root conversation, following the existing budget lifecycle.
+submission and Esc handling intact. Each row represents one open root conversation,
+including inactive internal tabs. A conversation opened in two terminals appears
+once and keeps the same Odometer name, budget and fallback state. Its OpenCode
+title appears beside the model to help identify the matching tab. The terminal
+title and composer label show the active conversation's Odometer name.
+
+The New session screen has a separate unbound row. A budget configured there
+applies only to the newly created conversation, not an existing tab selected
+from history. Closed tabs disappear from the list; conversation budgets persist
+and reattach when reopened. Pruning preserves their original/fallback spending
+as numeric aggregates without retaining every message. The first preview's
+existing terminal budget migrates to its currently bound conversation.
 
 ## Budgets and continuation
 
@@ -103,7 +121,8 @@ budget-owned routing while preserving an independent manual Odometer choice.
 An in-flight request may overshoot. Keep the widget running for enforcement;
 verdicts expire after 120 seconds. Spool/log retention limitations remain in the
 budget guide. Conversation text and provider credentials are not written to
-accounting or presence records.
+accounting records. Local presence includes conversation titles and identifiers;
+keep those files private.
 
 ## Build and verify
 

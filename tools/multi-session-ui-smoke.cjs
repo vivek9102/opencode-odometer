@@ -13,9 +13,9 @@ const {join}=require('node:path');
  await page.addInitScript(()=>{
   const row=(id,name,cost,limit,mode='hard')=>({id,name,session_id:'chat-'+id,model:'mock/model-'+id,cost,spent:cost,limit,mode,enabled:limit>0,fraction:limit?cost/limit:0,state:!limit?'ok':cost>=limit?'over':cost>=limit*.75?'warn':'ok',enforced:limit>0,active:false});
   window.testSnap={view:'TRIP',cost:2.6883,open_cost:2.6883,total_cost:2.6883,trip_cost:2.6883,saved:132.05232,rate:0,tokens:52341000,seeded:true,active:false,compact:false,connected:true,session_id:'chat-one',selected_session:'one',open_sessions:[row('one','auth-refactor',1.07,.5),row('two','migration-db',.41,.5,'soft'),row('three','api-cleanup',1.2083,0)],rows:Array.from({length:30},(_,i)=>({key:'mock/model-'+i,msgs:20,in:1800000,out:120400,cache:41200000,cost:.1,saved:0})),sparkline:Array(30).fill(.01),preferences:{idle_dim:true,remaining:false},unpriced_models:0,charge:{sequence:0,cost:0}};
-  window.calls=[];window.budgetResolvers=[];window.selectionResolvers=[];const emit=()=>window.refreshHandler?.({...testSnap});
+  window.calls=[];window.budgetResolvers=[];window.selectionResolvers=[];window.compactResolvers=[];const emit=()=>window.refreshHandler?.({...testSnap});
   window.runtime={EventsOn:(name,cb)=>window.refreshHandler=cb};
-  window.go={wservice:{Service:{Snapshot:async()=>({...testSnap}),SetScreenSize:async()=>{},SetCompact:async on=>{calls.push(['compact',on]);testSnap.compact=on;emit();},SetPeek:async()=>{},FallbackModels:async()=>[],SelectOpenSession:async id=>{calls.push(['select',id]);if(window.holdSelections)await new Promise(resolve=>selectionResolvers.push(resolve));testSnap.selected_session=id;emit();},
+  window.go={wservice:{Service:{Snapshot:async()=>({...testSnap}),SetScreenSize:async()=>{},SetCompact:async on=>{calls.push(['compact',on]);if(window.holdCompact)await new Promise(resolve=>compactResolvers.push(resolve));testSnap.compact=on;emit();},SetPeek:async()=>{},FallbackModels:async()=>[],SelectOpenSession:async id=>{calls.push(['select',id]);if(window.holdSelections)await new Promise(resolve=>selectionResolvers.push(resolve));testSnap.selected_session=id;emit();},
    ReconcileWindowLayout:async()=>{calls.push(['reconcile']);},
    SetOpenSessionBudget:async(id,limit,mode,enabled)=>{calls.push(['budget',id,limit,mode,enabled]);if(window.holdBudgets)await new Promise(resolve=>budgetResolvers.push(resolve));const r=testSnap.open_sessions.find(r=>r.id===id);Object.assign(r,{limit,mode,enabled,fraction:limit?r.cost/limit:0,state:!enabled?'ok':r.cost>=limit?'over':r.cost>=limit*.75?'warn':'ok'});emit();},
    FallbackModels:async()=>[{key:'mock/cheap',provider:'mock',category:'chat',eligible:true,cheaper:true,name:'Cheap coding model',input:.1,output:.4,ratio:.05,metadata:{coding:51.2,intelligence:48.1,reasoning:true,speed:100,source:'Artificial Analysis',benchmark_id:'example-benchmark'},tags:['tools','coding','reasoning']},{key:'mock/unrated',provider:'mock',category:'chat',eligible:true,cheaper:true,name:'Compact chat model',input:.05,output:.2,ratio:.025,metadata:{},tags:['tools']},{key:'mock/free',provider:'mock',category:'chat',eligible:true,cheaper:true,name:'Free model',input:0,output:0,free:true,metadata:{},tags:['tools','free']},{key:'other/embedding',provider:'other',category:'embedding',eligible:false,cheaper:true,name:'Embedding model',input:.01,output:0,metadata:{},reason:'Specialised model; cannot continue a chat.'},{key:'mock/expensive',provider:'mock',category:'chat',eligible:false,cheaper:false,name:'Expensive model',input:10,output:30,metadata:{},reason:'This configured route is not cheaper.'}],
@@ -34,6 +34,16 @@ const {join}=require('node:path');
  try{
   await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.locator('.session-row').first().waitFor();
   assert.equal(await page.locator('.session-row').count(),3);assert.equal(await page.locator('#selected-name').innerText(),'auth-refactor');
+  await page.evaluate(()=>{window.holdCompact=true;void setView(false)});
+  await page.waitForFunction(()=>compactResolvers.length===1);
+  await page.evaluate(()=>render({...testSnap,compact:false}));
+  assert.ok(await page.evaluate(()=>document.body.classList.contains('compact-mode')),'stale refresh undid prepared dock CSS');
+  assert.equal(await page.locator('#bar').isVisible(),true);assert.equal(await page.locator('#board').isVisible(),false);
+  await page.evaluate(()=>{holdCompact=false;compactResolvers.shift()()});
+  await page.waitForFunction(()=>viewIntent===null);
+  await page.evaluate(()=>setView(true));
+  assert.ok(!await page.evaluate(()=>document.body.classList.contains('compact-mode')));
+  assert.equal(await page.locator('#board').isVisible(),true);
   assert.equal(await page.locator('.utility-row button:visible').count(),8,'requested footer action missing');
   assert.deepEqual(await page.locator('[data-counter]').allTextContents(),['Open sessions','Since reset','All time']);
   await page.locator('#bd-usage').click();await page.locator('#usage-period').selectOption('custom');
@@ -219,7 +229,7 @@ const {join}=require('node:path');
   assert.equal(await page.locator('#bar-model').innerText(),'⚠ clear-fox-930e1799 82%');await dockFits();await page.screenshot({path:join(out,'docked-warning.png')});
   await page.evaluate(()=>{Object.assign(testSnap.open_sessions[0],{cost:.55,fraction:1.1});render(testSnap);});
   assert.equal(await page.locator('#bar-model').innerText(),'clear-fox-930e1799');assert.equal(await page.locator('#bar-rate').innerText(),'$0.55 / $0.50');assert.ok(await page.locator('#bar').evaluate(e=>e.classList.contains('session-over')));assert.doesNotMatch(await page.locator('#bar').innerText(),/OVER/);await dockFits();await page.screenshot({path:join(out,'docked-over.png')});
-  await page.locator('#bar-expand').click();await page.setViewportSize({width:800,height:780});assert.equal(await page.locator('#selected-name').innerText(),'clear-fox-930e1799','expanding failed to select the actual breach');
+  await page.locator('#bar-expand').click();await page.waitForFunction(()=>viewIntent===null);await page.setViewportSize({width:800,height:780});assert.equal(await page.locator('#selected-name').innerText(),'clear-fox-930e1799','expanding failed to select the actual breach');
   await page.evaluate(()=>{testSnap.compact=true;testSnap.preferences.paused=true;render(testSnap);});await page.setViewportSize({width:340,height:46});assert.equal(await page.locator('#bar-rate').innerText(),'PAUSED','breach hid the pause indication');
   await page.evaluate(()=>{testSnap.preferences.paused=false;testSnap.open_sessions[0].name='clear-panda-87654321';testSnap.open_sessions[1].name='clear-panda-12345678';render(testSnap);});
   assert.equal(await page.locator('#bar-model').innerText(),'clear-panda-87654321');await dockFits();

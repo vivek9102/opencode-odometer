@@ -12,6 +12,7 @@ const MODE_TIP = {
 };
 
 let snapshot = null; // last snapshot, for menu actions and the advice screen
+let viewIntent = null; // Protect the prepared layout from an older refresh.
 
 // ---- odometer digit rendering (mirrors the Python beveled cells) ----
 function odometerHTML(kind) {
@@ -190,6 +191,7 @@ function budgetLabelTip(snap) {
 }
 
 function render(snap) {
+	if(viewIntent!==null)snap={...snap,compact:viewIntent};
 	 snap = selectedSnapshot(snap);
   snapshot = snap;
   document.body.classList.toggle("compact-mode", snap.compact);
@@ -330,11 +332,21 @@ function render(snap) {
 }
 
 // ---- view switching ----
-function setView(toBoard) {
+async function setView(toBoard) {
+  if(viewIntent!==null)return;
+  const previous=snapshot?.compact;
+  viewIntent=!toBoard;
   cancelPeek();
+  document.body.classList.toggle("compact-mode",!toBoard);
   $("bar").classList.toggle("hidden", toBoard);
   $("board").classList.toggle("hidden", !toBoard);
-  Svc().SetCompact(!toBoard); // also docks (compact) or centers (board)
+  // Let WebView paint the prepared panel before its native rectangle grows.
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  try{await Svc().SetCompact(!toBoard);}catch(error){
+    viewIntent=null;
+    if(snapshot&&previous!==undefined)render({...snapshot,compact:previous});
+    console.error("Window layout change failed",error);
+  }finally{viewIntent=null;}
 }
 
 // ---- clipboard ----

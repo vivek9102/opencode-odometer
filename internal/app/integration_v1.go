@@ -16,6 +16,7 @@ var pluginSource []byte
 var tuiSource []byte
 
 var v2ModelSource []byte
+var v2SessionSource []byte
 
 func CheckOpenCodeCompatibility() error { return nil }
 

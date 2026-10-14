@@ -14,9 +14,17 @@ WebView2 Runtime, normally available on Windows 11 and current Windows 10.
 
 ## Install or upgrade
 
-**OpenCode V2:** use the separately labelled preview build and follow the
-[V2 edition guide](docs/OPENCODE_V2.md). The instructions below describe the V1
-edition; its plugin files cannot be used unchanged with V2.
+Choose the executable for your **OpenCode major version**. The Odometer version
+number is separate from the OpenCode version.
+
+| Installed OpenCode | Odometer release | Source |
+|---|---|---|
+| OpenCode V1 | [V1 edition, v2.2.0](https://github.com/vivek9102/opencode-odometer/releases/tag/v2.2.0) | `main` |
+| OpenCode V2 | [V2 edition, v2.3.1 preview](https://github.com/vivek9102/opencode-odometer/releases/tag/opencode-v2-v2.3.1) | `codex/opencode-v2` |
+
+For V2, follow the [V2 edition guide](docs/OPENCODE_V2.md). It is tested with
+OpenCode 2.0.28 and uses a separate plugin package and executable. The instructions
+below describe the V1 edition. Do not run both Odometer editions simultaneously.
 
 1. Download the Windows executable from [Releases](https://github.com/vivek9102/opencode-odometer/releases).
 2. Quit the previous Odometer instance, then run the downloaded executable once.
@@ -36,8 +44,9 @@ it once from its new location so OpenCode can find it.
 
 ## Features
 
-- **Open sessions:** current OpenCode terminal UI instances appear before their
-  first chat. Select a row to edit its budget or stop its current activity.
+- **Open sessions:** V1 shows terminal UI instances before their first chat.
+  V2 shows individual conversations across internal tabs, deduplicating a chat
+  opened in multiple terminals. Select a row to edit its budget or stop its activity.
 - **Hard budgets:** enabling a limit starts a fresh allowance. At exhaustion,
   block further paid requests or continue on a configured fallback model.
 - **Automatic fallback:** interrupt the original turn and submit one

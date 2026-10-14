@@ -48,7 +48,7 @@ function renderOpenSessions(snap){
       button.append(info,budget,tag);button.addEventListener("click",()=>selectOpenSession(row.id));
     }
     const [info,budget,tag]=button.children,[title,model]=info.children,[spent,bar]=budget.children,fill=bar.firstElementChild;
-    title.textContent=row.name;title.title=row.name;model.textContent=row.on_fallback?`↓ ${row.fallback_model}`:row.model||"idle · no model used yet";model.title=model.textContent;
+    title.textContent=row.name;title.title=row.name;model.textContent=(row.title?`${row.title} · `:"")+(row.on_fallback?`↓ ${row.fallback_model}`:row.model||"idle · no model used yet");model.title=model.textContent;
     spent.textContent=row.enabled?`${row.on_fallback?"Original ":""}$${row.cost.toFixed(2)} / $${row.limit.toFixed(2)}`:`$${row.spent.toFixed(2)} · no limit`;
     spent.title=row.on_fallback?"Completed original-model allowance; the fallback is shown below":"";
     fill.style.width=`${Math.min(100,(row.fraction||0)*100)}%`;fill.style.background=sessionColour(row);bar.classList.toggle("hidden",!row.enabled||row.on_fallback);budget.style.color=row.enabled?sessionColour(row):"var(--dim)";

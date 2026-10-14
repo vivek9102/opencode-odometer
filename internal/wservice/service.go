@@ -954,10 +954,6 @@ func (s *Service) SetCompact(on bool) {
 	}
 	s.SetPeek(false)
 	s.appCompact = on
-	if s.App != nil {
-		s.App.LogEvent("SetCompact on=%v", on)
-		s.App.SetCompact(on)
-	}
 	if s.Ctx != nil {
 		runtime.WindowSetSize(s.Ctx, windowWidth(on), windowHeight(on))
 		if on {
@@ -965,6 +961,12 @@ func (s *Service) SetCompact(on bool) {
 		} else {
 			runtime.WindowCenter(s.Ctx)
 		}
+	}
+	// Resize immediately. Persisting the ledger can take long enough to leave
+	// a newly selected layout inside the previous native rectangle.
+	if s.App != nil {
+		s.App.LogEvent("SetCompact on=%v", on)
+		s.App.SetCompact(on)
 	}
 	s.refresh()
 }

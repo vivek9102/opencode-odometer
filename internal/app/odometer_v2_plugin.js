@@ -1,6 +1,7 @@
 // OpenCode 2.0.28 server adapter. Provider credentials and conversation text
 // stay in OpenCode; only accounting metadata crosses the local file bridge.
 import {normalizeModel} from "./v2-models.js"
+import {hasConversation} from "./v2-sessions.js"
 export {normalizeModel} from "./v2-models.js"
 import {randomUUID} from "node:crypto"
 import {spawn} from "node:child_process"
@@ -107,7 +108,7 @@ function createRuntime(){
     let files=[];try{files=readdirSync(directory())}catch{}
     return files.filter(f=>/^tui-[a-zA-Z0-9-]+\.json$/.test(f)).map(f=>read(join(directory(),f))).filter(t=>t&&!t.closed&&t.api_major===2&&t.server_pid===process.pid&&Date.now()/1000-t.updated<30)
   }
-  function ownerContext(tui){return contexts.get(tui.location)||contexts.get(sessions.get(tui.session_id))}
+  function ownerContext(tui,sid=tui.session_id){return contexts.get(tui.tabs?.find(t=>t.session_id===sid)?.location)||contexts.get(sessions.get(sid))||contexts.get(tui.location)}
   async function refresh(){
     if(refreshing||closed)return;refreshing=true
     try{
@@ -116,10 +117,16 @@ function createRuntime(){
         try{const list=unwrap(await call(signal=>ctx.model.list(undefined,{signal})));if(Array.isArray(list)){catalogs.set(location,list.filter(m=>m.enabled!==false).map(normalizeModel));catalogTimes.set(location,Date.now())}}catch{}
       }
       for(const tui of presence()){
-        const ctx=ownerContext(tui);if(!ctx||!identifier(tui.session_id))continue
-        try{await observe(ctx,tui.session_id);if(!backfilled.has(tui.session_id)){await messages(ctx,tui.session_id);backfilled.add(tui.session_id)}}catch{}
+        const ids=[...new Set([tui.session_id,...(tui.tabs||[]).map(t=>t.session_id)].filter(identifier))]
+        const models=new Map()
+        for(const sid of ids){
+          const ctx=ownerContext(tui,sid);if(!ctx)continue
+          try{await observe(ctx,sid);if(!backfilled.has(sid)){await messages(ctx,sid);backfilled.add(sid)}}catch{}
+          for(const m of catalogs.get(ctx.location.directory)||[])models.set(m.key,m)
+        }
+        if(!ids.length)continue
         write(`models-${tui.pid}.json`,{api_major:2,server_pid:process.pid,switch_protocol:3,continue_protocol:2,abort_protocol:1,
-          pid:tui.pid,instance,updated:Math.floor(Date.now()/1000),sessions:[tui.session_id],models:catalogs.get(ctx.location.directory)||[]})
+          pid:tui.pid,instance,updated:Math.floor(Date.now()/1000),sessions:ids,models:[...models.values()]})
         published.add(tui.pid)
       }
       for(const pid of published)if(!presence().some(t=>t.pid===pid)){try{rmSync(join(directory(),`models-${pid}.json`),{force:true})}catch{};published.delete(pid)}
@@ -226,7 +233,7 @@ function createRuntime(){
       for(const m of history)for(const f of m.prompt?.files||[]){const uri=String(f.uri||"");const modality=/^data:image|\.(png|jpe?g|webp|gif)$/i.test(uri)?"image":/\.pdf$/i.test(uri)?"pdf":null;if(modality&&!(req.input_modalities||found.input_modalities).includes(modality))throw Error("Fallback does not support a conversation attachment")}
       const allowance=transition(req)
       if(!free(budget(),req.key)&&!(allowance.limit-allowance.cost>(estimate*req.input_price+32*req.output_price)/1e6))throw Error("Fallback allowance cannot cover the estimated next request")
-      if(!presence().some(t=>t.id===tui.id&&t.session_id===req.session_id))throw Error("The owning terminal changed or closed")
+      if(!presence().some(t=>hasConversation(t,req.session_id)))throw Error("The conversation closed in all terminals")
       status(req,"dispatching","Sending one continuation on the selected fallback.",ids)
       transition(req)
       const clock=(BigInt(Date.now())*4096n&((1n<<48n)-1n)).toString(16).padStart(12,"0"),id=`msg_${clock}${req.id.replaceAll("-","").slice(0,14)}`
@@ -253,12 +260,12 @@ function createRuntime(){
     try{
       await releaseRoutes()
       for(const tui of presence()){
-        const ctx=ownerContext(tui);if(!ctx||!identifier(tui.session_id))continue
         let files=[];try{files=readdirSync(directory())}catch{}
         for(const name of files){
           if(!name.startsWith(`continue-${tui.pid}-`)||!name.endsWith(".json"))continue
           const file=join(directory(),name),req=read(file)
-          if(!req||!identifier(req.id)||req.instance!==instance||req.session_id!==tui.session_id||Date.now()/1000-req.issued>600)continue
+          if(!req||!identifier(req.id)||req.instance!==instance||!hasConversation(tui,req.session_id)||Date.now()/1000-req.issued>600)continue
+          const ctx=ownerContext(tui,req.session_id);if(!ctx)continue
           // Persist the claim before any async side effect. A restart must
           // report uncertainty instead of buying a duplicate continuation.
           rmSync(file,{force:true})

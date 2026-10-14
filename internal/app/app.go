@@ -425,9 +425,16 @@ func (a *App) SaveState() {
 	a.mu.RLock()
 	keep := a.openRecordsLocked()
 	a.mu.RUnlock()
+	var beforePrune []ledger.Record
+	if IntegrationV2 {
+		beforePrune = a.Ledger.GetMessagesSnapshot()
+	}
 	a.Ledger.PruneKeeping(a.cfg.MaxMessages, keep)
 
 	a.mu.Lock()
+	if IntegrationV2 {
+		a.archiveV2PolicySpendLocked(beforePrune)
+	}
 	a.state.BudgetBaselines = a.baselinesLocked()
 	a.state.BudgetAllow = a.allowLocked()
 	a.state.GraceUsed = a.graceUsedLocked()

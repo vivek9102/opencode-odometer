@@ -16,15 +16,21 @@ import (
 
 // OpenTUI is presence reported by the TUI, never inferred from saved history.
 type OpenTUI struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	PID       int    `json:"pid"`
-	Started   int64  `json:"started"`
-	Updated   int64  `json:"updated"`
-	SessionID string `json:"session_id"`
-	Model     string `json:"model"`
-	Active    bool   `json:"active"`
-	Closed    bool   `json:"closed"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	PID          int       `json:"pid"`
+	Started      int64     `json:"started"`
+	Updated      int64     `json:"updated"`
+	SessionID    string    `json:"session_id"`
+	Model        string    `json:"model"`
+	Active       bool      `json:"active"`
+	Closed       bool      `json:"closed"`
+	APIMajor     int       `json:"api_major,omitempty"`
+	TerminalID   string    `json:"terminal_id,omitempty"`
+	Title        string    `json:"title,omitempty"`
+	Focused      bool      `json:"focused,omitempty"`
+	Tabs         []OpenTUI `json:"tabs,omitempty"`
+	DraftStarted int64     `json:"draft_started,omitempty"`
 }
 
 type OpenPolicy struct {
@@ -48,6 +54,8 @@ type OpenPolicy struct {
 	TransitionAt     int64           `json:"transition_at,omitempty"`
 	Detail           string          `json:"detail,omitempty"`
 	Event            string          `json:"event,omitempty"`
+	ArchivedOriginal float64         `json:"archived_original,omitempty"`
+	ArchivedFallback float64         `json:"archived_fallback,omitempty"`
 }
 
 type OpenSessionRow struct {
@@ -80,6 +88,9 @@ type OpenSessionRow struct {
 // RefreshOpenSessions removes closed/dead TUIs. A delayed heartbeat from a
 // still-running process must not delete its allowance during a model/tool call.
 func (a *App) RefreshOpenSessions() {
+	if IntegrationV2 && a.refreshV2OpenSessions() {
+		return
+	}
 	files, _ := filepath.Glob(filepath.Join(a.experienceDir(), "tui-*.json"))
 	now := time.Now().Unix()
 	a.mu.Lock()
@@ -153,6 +164,10 @@ func (a *App) RefreshOpenSessions() {
 func (a *App) openSpendLocked(entry OpenTUI, records []ledger.Record) float64 {
 	start := time.UnixMilli(entry.Started).Format("2006-01-02 15:04:05")
 	cost := 0.0
+	if entry.APIMajor == 2 {
+		p := a.state.OpenPolicies[entry.ID]
+		cost = p.ArchivedOriginal + p.ArchivedFallback
+	}
 	for _, rec := range records {
 		if entry.SessionID != "" && budgetRoot(rec.SessionID, a.state.SessionParents) == entry.SessionID && rec.Timestamp >= start {
 			cost += rec.Cost
@@ -179,10 +194,14 @@ func (a *App) openRecordsLocked() map[string]bool {
 }
 
 func (a *App) openRowsLocked() []OpenSessionRow {
+	return a.sessionRowsLocked(a.openTUIs)
+}
+
+func (a *App) sessionRowsLocked(entries map[string]OpenTUI) []OpenSessionRow {
 	records := a.Ledger.GetMessagesSnapshot()
-	rows := make([]OpenSessionRow, 0, len(a.openTUIs))
+	rows := make([]OpenSessionRow, 0, len(entries))
 	paused := a.Preferences().Paused
-	for id, entry := range a.openTUIs {
+	for id, entry := range entries {
 		p := a.state.OpenPolicies[id]
 		if p.Mode == "" {
 			p.Mode = "hard"
@@ -426,14 +445,22 @@ func (a *App) publishOpenBudgetsLocked() {
 	doc := plugin.BudgetFile{FreeModels: a.freeModelKeys(), Enabled: !a.Preferences().Paused, WarnAtPercent: 75, BlockWhenExceeded: true, Mode: "hard", HardStopAt: 1, GraceTurns: 0, Sessions: map[string]plugin.Session{}}
 	doc.Accounted = map[string]string{}
 	for _, rec := range a.Ledger.GetMessagesSnapshot() {
-		for _, entry := range a.openTUIs {
+		entries := a.openTUIs
+		if IntegrationV2 {
+			entries = a.v2BudgetEntriesLocked()
+		}
+		for _, entry := range entries {
 			if budgetRoot(rec.SessionID, a.state.SessionParents) == entry.SessionID {
 				doc.Accounted[rec.MID] = fmt.Sprintf("%d/%d/%d/%d/%d/%s", rec.TokensIn, rec.TokensOut, rec.Reasoning, rec.CacheRead, rec.CacheWrite, rec.Finish)
 				break
 			}
 		}
 	}
-	for _, row := range a.openRowsLocked() {
+	budgetRows := a.openRowsLocked()
+	if IntegrationV2 {
+		budgetRows = a.sessionRowsLocked(a.v2BudgetEntriesLocked())
+	}
+	for _, row := range budgetRows {
 		if row.SessionID == "" || !row.Enabled {
 			continue
 		}

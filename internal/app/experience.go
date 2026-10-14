@@ -396,7 +396,11 @@ func (a *App) SuppressRelaunch() error {
 	var instances []string
 	if IntegrationV2 {
 		for _, row := range a.OpenSessions() {
-			instances = append(instances, row.ID)
+			id := row.ID
+			if row.TerminalID != "" {
+				id = row.TerminalID
+			}
+			instances = append(instances, id)
 		}
 	}
 	files, _ := filepath.Glob(filepath.Join(a.experienceDir(), "models-*.json"))
