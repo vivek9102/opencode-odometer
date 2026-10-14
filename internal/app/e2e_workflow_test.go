@@ -183,6 +183,9 @@ const e2ePricesJSON = `{
 }`
 
 func TestEndToEndWorkflow(t *testing.T) {
+	if app.IntegrationV2 {
+		t.Skip("V1 HTTP/SSE workflow; V2 uses tools/opencode-v2-smoke.cjs with the real file bridge")
+	}
 	mockServer := newMockOpenCodeServer()
 	defer mockServer.close()
 

@@ -27,6 +27,7 @@ func PointerFilePath() string {
 
 // PointerPayload is the structure written to ~/.opencode-odometer.json.
 type PointerPayload struct {
+	APIMajor   int    `json:"api_major,omitempty"`
 	Comment    string `json:"_comment"`
 	DataDir    string `json:"data_dir"`
 	Budget     string `json:"budget"`
@@ -50,6 +51,9 @@ func WritePointer(dataDir, budgetFile, graceFile, appDir, executable string) err
 		Executable: executable,
 		PID:        os.Getpid(),
 		Updated:    time.Now().Unix(),
+	}
+	if IntegrationV2 {
+		payload.APIMajor = 2
 	}
 	raw, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

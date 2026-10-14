@@ -77,6 +77,9 @@ func main() {
 		}
 		return
 	}
+	if err := app.CheckOpenCodeCompatibility(); err != nil {
+		log.Fatalf("%s compatibility check: %v", app.IntegrationName, err)
+	}
 	dir := dataDir()
 	logPath := filepath.Join(dir, "opencode_odometer_events.log")
 	logMsg := func(format string, args ...any) {
@@ -163,8 +166,12 @@ func main() {
 		logMsg("plugin updated at %s - restart OpenCode to activate", st.Path)
 	}
 
+	title := "OpenCode Odometer"
+	if app.IntegrationV2 {
+		title += " · " + app.IntegrationName
+	}
 	err = wails.Run(&options.App{
-		Title:            "OpenCode Odometer",
+		Title:            title,
 		Width:            340,
 		Height:           46,
 		Frameless:        true,

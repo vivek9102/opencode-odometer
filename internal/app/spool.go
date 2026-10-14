@@ -58,7 +58,9 @@ func (a *App) DrainSpool() int {
 	changed := 0
 	for _, rec := range recs {
 		if rec.Type == "session" {
-			if a.SetSessionParent(rec.ID, rec.ParentID) { changed++ }
+			if a.SetSessionParent(rec.ID, rec.ParentID) {
+				changed++
+			}
 			continue
 		}
 		if rec.Type == "message.removed" {
@@ -156,7 +158,11 @@ func (a *App) PluginInstalled() bool {
 	if dir == "" {
 		return false
 	}
-	fi, err := os.Stat(filepath.Join(dir, PluginFileName))
+	path := filepath.Join(dir, PluginFileName)
+	if IntegrationV2 {
+		path = filepath.Join(dir, "odometer-v2", "index.js")
+	}
+	fi, err := os.Stat(path)
 	return err == nil && fi.Size() > 0
 }
 

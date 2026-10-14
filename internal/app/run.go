@@ -274,6 +274,11 @@ func (a *App) Poll() {
 	// works when OpenCode serves its API in-process (no TCP port), which is
 	// the default for the TUI.
 	a.DrainSpool()
+	// V2 uses the loaded plugin's authenticated client. The V1 HTTP client
+	// must not probe or parse a V2 server with the old contracts.
+	if IntegrationV2 {
+		return
+	}
 
 	// When the plugin is feeding us and no stream is attached, there is no
 	// server to poll — every REST call would just fail. Skip them rather than

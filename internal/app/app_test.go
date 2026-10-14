@@ -397,6 +397,12 @@ func TestSyncRecentIncremental(t *testing.T) {
 		},
 	}
 	a.Client = stub
+	poll := a.Poll
+	if IntegrationV2 {
+		// Test the retained V1 incremental reader directly; the V2 runtime
+		// intentionally does not invoke that transport from Poll.
+		poll = func() { _, _ = a.SyncRecent() }
+	}
 
 	// Initial seed
 	if err := a.SeedHistory(); err != nil {
@@ -407,7 +413,7 @@ func TestSyncRecentIncremental(t *testing.T) {
 	}
 
 	// First Poll without updates should do nothing
-	a.Poll()
+	poll()
 	if a.Ledger.TotalCost != 8.55 {
 		t.Errorf("unexpected cost change: %v", a.Ledger.TotalCost)
 	}
@@ -417,7 +423,7 @@ func TestSyncRecentIncremental(t *testing.T) {
 	stub.messages["s1"] = append(stub.messages["s1"], asst("m2", "s1", "acme", "sonnet", 0))
 
 	// Poll should detect the update and ingest m2
-	a.Poll()
+	poll()
 	// 2 messages @ 8.55 = 17.10 total, trip = 8.55
 	if a.Ledger.TotalCost != 17.10 {
 		t.Errorf("total cost = %v, want 17.10", a.Ledger.TotalCost)
@@ -429,4 +435,3 @@ func TestSyncRecentIncremental(t *testing.T) {
 		t.Errorf("burn rate should be positive, got %v", a.BurnRate())
 	}
 }
-

@@ -14,6 +14,73 @@ func registerTUIPlugin(dir, entry string) error {
 	if _, err := os.Stat(filepath.Join(dir, "tui.jsonc")); err == nil {
 		path = filepath.Join(dir, "tui.jsonc")
 	}
+	return registerPluginArray(path, entry, "plugin")
+}
+
+func registerCLIPlugin(dir, entry string) error {
+	raw, body, err := prepareCLIPlugin(dir, entry)
+	if err != nil {
+		return err
+	}
+	if string(raw) == string(body) {
+		return nil
+	}
+	return atomicExperienceFile(filepath.Join(dir, "cli.json"), body)
+}
+
+func prepareCLIPlugin(dir, entry string) ([]byte, []byte, error) {
+	path := filepath.Join(dir, "cli.json")
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		raw = []byte("{}")
+	} else if err != nil {
+		return nil, nil, err
+	}
+	var cfg map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &cfg); err != nil || cfg == nil {
+		return nil, nil, fmt.Errorf("cannot safely register V2 plugin: invalid cli.json")
+	}
+	var entries []json.RawMessage
+	if value, ok := cfg["plugins"]; ok {
+		if len(value) == 0 || value[0] != '[' || json.Unmarshal(value, &entries) != nil {
+			return nil, nil, fmt.Errorf("CLI plugins setting must be an array")
+		}
+	}
+	normalize := func(p string) string { return strings.ToLower(strings.TrimPrefix(filepath.ToSlash(p), "file:///")) }
+	legacy := normalize(filepath.Join(dir, "odometer-tui.tsx"))
+	filtered := make([]json.RawMessage, 0, len(entries)+1)
+	found := false
+	for _, value := range entries {
+		var source string
+		if json.Unmarshal(value, &source) != nil {
+			var object struct {
+				Package string `json:"package"`
+			}
+			_ = json.Unmarshal(value, &object)
+			source = object.Package
+		}
+		if normalize(source) == legacy {
+			continue
+		}
+		if normalize(source) == normalize(entry) {
+			found = true
+		}
+		filtered = append(filtered, value)
+	}
+	if !found {
+		value, _ := json.Marshal(filepath.ToSlash(entry))
+		filtered = append(filtered, value)
+	}
+	cfg["plugins"], _ = json.Marshal(filtered)
+	body, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	body = append(body, '\n')
+	return raw, body, nil
+}
+
+func registerPluginArray(path, entry, keyName string) error {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		raw = []byte("{}\n")
@@ -27,7 +94,7 @@ func registerTUIPlugin(dir, entry string) error {
 	}
 	entry = filepath.ToSlash(entry)
 	encoded, _ := json.Marshal(entry)
-	if value, ok := cfg["plugin"]; ok {
+	if value, ok := cfg[keyName]; ok {
 		var plugins []json.RawMessage
 		if json.Unmarshal(value, &plugins) != nil || len(value) == 0 || value[0] != '[' {
 			return fmt.Errorf("TUI plugin setting must be an array")
@@ -60,7 +127,7 @@ func registerTUIPlugin(dir, entry string) error {
 				}
 				var key string
 				json.Unmarshal(clean[start:i+1], &key)
-				if depth != 1 || key != "plugin" {
+				if depth != 1 || key != keyName {
 					continue
 				}
 				j := i + 1
@@ -81,7 +148,7 @@ func registerTUIPlugin(dir, entry string) error {
 		return fmt.Errorf("cannot locate the TUI plugin array safely")
 	}
 	start := strings.IndexByte(string(clean), '{') + 1
-	insert := []byte("\n  \"plugin\": [" + string(encoded) + "]")
+	insert := []byte("\n  \"" + keyName + "\": [" + string(encoded) + "]")
 	if len(cfg) > 0 {
 		insert = append(insert, ',')
 	}

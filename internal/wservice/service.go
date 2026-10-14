@@ -1183,54 +1183,59 @@ func (s *Service) Start() {
 	s.refresh()
 	s.applyPosition()
 
-	// Initial sync in background so startup doesn't block window rendering
-	go func() {
-		if !a.Seeded() {
-			_ = a.SeedHistory()
-		} else {
-			_, _ = a.SyncHistory(false)
-		}
-		s.refresh()
-	}()
+	// V2 accounting is delivered by the authenticated plugin file bridge.
+	// Keep the V1 HTTP/SSE path intact in the original edition.
+	if !app.IntegrationV2 {
+		// Initial sync in background so startup doesn't block window rendering
+		go func() {
+			if !a.Seeded() {
+				_ = a.SeedHistory()
+			} else {
+				_, _ = a.SyncHistory(false)
+			}
+			s.refresh()
+		}()
 
-	go func() {
-		for {
-			select {
-			case <-s.stopCh:
-				return
-			case <-ctx.Done():
-				return
-			default:
-			}
-			connected, _ := a.Connected()
-			if connected {
-				s.resetBackoff()
-			}
-			if err := a.RunContext(ctx, func(_ bool) { s.refresh() }); err != nil {
-				if ctx.Err() == nil {
-					// A closed OpenCode produces this every few seconds; log
-					// it at most once a minute so the log stays readable and
-					// bounded. The UI shows the disconnected state live.
-					a.LogThrottled("stream-disconnect", time.Minute,
-						"stream disconnected: %v", err)
-					log.Printf("stream disconnected: %v", err)
+		go func() {
+			for {
+				select {
+				case <-s.stopCh:
+					return
+				case <-ctx.Done():
+					return
+				default:
 				}
+				connected, _ := a.Connected()
+				if connected {
+					s.resetBackoff()
+				}
+				if err := a.RunContext(ctx, func(_ bool) { s.refresh() }); err != nil {
+					if ctx.Err() == nil {
+						// A closed OpenCode produces this every few seconds; log
+						// it at most once a minute so the log stays readable and
+						// bounded. The UI shows the disconnected state live.
+						a.LogThrottled("stream-disconnect", time.Minute,
+							"stream disconnected: %v", err)
+						log.Printf("stream disconnected: %v", err)
+					}
+				}
+				s.refresh()
+				select {
+				case <-s.stopCh:
+					return
+				case <-ctx.Done():
+					return
+				case <-time.After(s.backoff()):
+				}
+				// The server may have restarted on a different port.
+				a.Rediscover()
+				// Catch up any turns completed during disconnect
+				_, _ = a.SyncHistory(false)
+				s.refresh()
 			}
-			s.refresh()
-			select {
-			case <-s.stopCh:
-				return
-			case <-ctx.Done():
-				return
-			case <-time.After(s.backoff()):
-			}
-			// The server may have restarted on a different port.
-			a.Rediscover()
-			// Catch up any turns completed during disconnect
-			_, _ = a.SyncHistory(false)
-			s.refresh()
-		}
-	}()
+		}()
+
+	}
 
 	// 1-second ticker for live burn-rate decay, pulsing dot, and grace absorption (mirrors Python tick)
 	go func() {

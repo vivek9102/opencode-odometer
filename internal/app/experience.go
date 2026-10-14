@@ -394,6 +394,11 @@ func (a *App) RecentSpend() []float64 {
 // OpenCode launch still follows the user's persisted startup preference.
 func (a *App) SuppressRelaunch() error {
 	var instances []string
+	if IntegrationV2 {
+		for _, row := range a.OpenSessions() {
+			instances = append(instances, row.ID)
+		}
+	}
 	files, _ := filepath.Glob(filepath.Join(a.experienceDir(), "models-*.json"))
 	for _, file := range files {
 		var inv ModelInventory

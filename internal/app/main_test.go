@@ -1,4 +1,4 @@
-﻿package app
+package app
 
 import (
 	"os"
@@ -14,6 +14,9 @@ import (
 // temp directory that is deleted on cleanup, so the user's odometer silently
 // stops recording spend until the app is restarted.
 func TestMain(m *testing.M) {
+	if IntegrationV2 {
+		probeOpenCodeVersion = func() (string, error) { return "opencode v2.0.28", nil }
+	}
 	tmp, err := os.MkdirTemp("", "odo-test-home")
 	if err != nil {
 		panic(err)

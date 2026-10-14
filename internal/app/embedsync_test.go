@@ -18,7 +18,7 @@ func TestEmbeddedPluginMatchesSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, err := os.ReadFile(filepath.Join(root, "plugin", "odometer.js"))
+	src, err := os.ReadFile(filepath.Join(root, "plugin", ServerSourceName))
 	if err != nil {
 		t.Skipf("source plugin not available: %v", err)
 	}
@@ -26,13 +26,19 @@ func TestEmbeddedPluginMatchesSource(t *testing.T) {
 		t.Fatal("internal/app/odometer_plugin.js is out of date.\n" +
 			"Run: copy plugin\\odometer.js internal\\app\\odometer_plugin.js")
 	}
-	for name, body := range map[string][]byte{"odometer-tui.tsx": tuiSource, "tui-presence.js": presenceSource} {
+	for name, body := range map[string][]byte{TerminalSourceName: tuiSource, "tui-presence.js": presenceSource} {
 		raw, err := os.ReadFile(filepath.Join(root, "plugin", name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if string(raw) != string(body) {
 			t.Fatalf("embedded %s is stale", name)
+		}
+	}
+	if IntegrationV2 {
+		raw, err := os.ReadFile(filepath.Join(root, "plugin", "v2-models.js"))
+		if err != nil || string(raw) != string(v2ModelSource) {
+			t.Fatal("embedded V2 model normalizer is stale")
 		}
 	}
 }

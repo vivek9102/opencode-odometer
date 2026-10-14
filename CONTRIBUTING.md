@@ -33,6 +33,10 @@ before building; use it only when those local installation effects are intended.
 
 ## Source layout
 
+The default build retains V1 integration. The `opencode_v2` build tag selects
+V2 server/terminal assets and transport while sharing the app core. See the
+[V2 edition guide](docs/OPENCODE_V2.md) for packaging and its isolated workflow test.
+
 | Path | Purpose |
 |---|---|
 | `internal/app` | Accounting orchestration, budgets, routing and persistence |

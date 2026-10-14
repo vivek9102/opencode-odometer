@@ -30,10 +30,21 @@ func TestEnsurePluginInstallsAndIsIdempotent(t *testing.T) {
 	if !strings.Contains(string(raw), "odometer") {
 		t.Error("written plugin does not look like the odometer plugin")
 	}
-	for _, name := range []string{"odometer-tui.tsx", "tui-presence.js", "tui.json"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+	configName := "tui.json"
+	companionDir := dir
+	tuiName := "odometer-tui.tsx"
+	if IntegrationV2 {
+		configName = "cli.json"
+		companionDir = filepath.Join(dir, "plugins", "odometer-v2")
+		tuiName = "tui.tsx"
+	}
+	for _, name := range []string{tuiName, "tui-presence.js"} {
+		if _, err := os.Stat(filepath.Join(companionDir, name)); err != nil {
 			t.Fatalf("companion %s not installed: %v", name, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, configName)); err != nil {
+		t.Fatal(err)
 	}
 
 	// Re-running must not rewrite an identical file: OpenCode watches this
@@ -57,6 +68,13 @@ func TestEnsurePluginReplacesStaleCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := filepath.Join(pdir, PluginFileName)
+	if IntegrationV2 {
+		pdir = filepath.Join(pdir, "odometer-v2")
+		if err := os.MkdirAll(pdir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		stale = filepath.Join(pdir, "index.js")
+	}
 	if err := os.WriteFile(stale, []byte("// old version\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

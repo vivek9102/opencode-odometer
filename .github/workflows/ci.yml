@@ -28,6 +28,12 @@ jobs:
       - name: Test
         run: go test -count=1 ./...
 
+      - name: Test V2 edition
+        run: go test -tags opencode_v2 -count=1 . ./internal/...
+
+      - name: Vet V2 edition
+        run: go vet -tags opencode_v2 . ./internal/... ./tools/v2-budget-host
+
       - name: Build
         run: go build ./...
 
@@ -40,6 +46,13 @@ jobs:
           node-version: "20"
       - name: Syntax check plugin
         run: node --check plugin/odometer.js
+
+      - name: Syntax check V2 bridge
+        run: |
+          node --check plugin/odometer-v2.js
+          node --check plugin/v2-models.js
+          node --check plugin/tui-presence.js
+          node --check tools/opencode-v2-smoke.cjs
       # frontend/dist/main.js is hand-edited (no build/bundle step), so a
       # syntax slip has nothing else to catch it before it ships embedded in
       # the binary via //go:embed all:frontend/dist.
